@@ -1,0 +1,20 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+django = "*"
+djangorestframework = "*"
+django-leaflet = "*"
+django-cors-headers = "*"
+django-environ = "*"
+psycopg = "*"
+psycopg-binary = "*"
+
+[dev-packages]
+black = "*"
+django-debug-toolbar = "*"
+
+[requires]
+python_version = "3.11"

@@ -1,0 +1,23 @@
+name,type,latitude,longitude,elevation,icao,iata
+Jomo Kenyatta International Airport,Airport,-1.319167,36.9275,5330,HKJK,NBO
+Moi International Airport,Airport,-4.034833,39.59425,200,HKMO,MBA
+Eldoret International Airport,Airport,0.404458,35.238889,7016,HKEL,EDL
+Kisumu International Airport,Airport,-0.086139,34.728892,3740,HKKI,KIS
+Wilson Airport,Airport,-1.321719,36.814833,5535,HKNW,WIL
+Malindi Airport,Airport,-3.229311,40.101666,80,HKML,MYD
+Ukunda Airport,Airport,-4.293333,39.571667,98,HKUK,UKA
+Wajir Airport,Airport,1.733239,40.091472,770,HKWJ,WJR
+Lokichogio Airport,Airport,4.298056,34.348056,2080,HKLK,LKG
+Garissa Airport,Airport,-0.463228,39.648333,476,HKGA,GAS
+Amboseli Airstrip,Airstrip,-2.643,37.256,3750,HKAM,
+Nanyuki Airstrip,Airstrip,-0.0663,37.041,6150,HKNY,NYK
+Keekorok Airstrip,Airstrip,-1.585,35.2506,5300,HKKR,
+Manda Airstrip,Airstrip,-2.252,40.913,20,HKLU,LAU
+Kichwa Tembo Airstrip,Airstrip,-1.408,35.01,5100,HKKT,
+Ol Kiombo Airstrip,Airstrip,-1.421,35.011,5000,HKOK,
+Olare Orok Airstrip,Airstrip,-1.352,35.003,4970,HKOR,
+Mugie Airstrip,Airstrip,0.282,36.793,6800,HKMG,
+Loisaba Airstrip,Airstrip,0.205,36.799,6000,HKLS,
+Kalama Airstrip,Airstrip,0.667,37.467,7200,HKKL,
+Borana Airstrip,Airstrip,0.281,36.874,6800,HKBA,
+Lewa Downs Airstrip,Airstrip,0.168,37.417,6200,HKLD,

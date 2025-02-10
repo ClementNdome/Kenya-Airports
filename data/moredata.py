@@ -1,0 +1,63 @@
+import csv
+
+# Define the CSV filename
+csv_filename = "airports_and_airstrips.csv"
+
+# Define the header with an extra 'Type' field
+header = [
+    "Type",                # Airport or Airstrip
+    "Name", 
+    "IATA", 
+    "ICAO", 
+    "Latitude", 
+    "Longitude", 
+    "Runway Length (m)", 
+    "Elevation (ft)", 
+    "Nearest City/Town", 
+    "Airlines"
+]
+
+# Data list to hold both airports and airstrips
+
+# --- 12 Airports ---
+airports = [
+    ["Airport", "Jomo Kenyatta International Airport", "NBO", "HKJK", -1.319167, 36.9275, 4217, 5330, "Nairobi", "Kenya Airways, Ethiopian Airlines, Emirates, Qatar Airways, British Airways"],
+    ["Airport", "Moi International Airport", "MBA", "HKMO", -4.034833, 39.59425, 3350, 200, "Mombasa", "Kenya Airways, Fly540, Turkish Airlines, Qatar Airways, Air India"],
+    ["Airport", "Eldoret International Airport", "EDL", "HKEL", 0.404458, 35.238333, 3475, 6941, "Eldoret", "Kenya Airways, Fly540"],
+    ["Airport", "Kisumu International Airport", "KIS", "HKKI", -0.086139, 34.728892, 3300, 3737, "Kisumu", "Kenya Airways, Jambojet"],
+    ["Airport", "Wilson Airport", "WIL", "HKNW", -1.321667, 36.814722, 1430, 5536, "Nairobi", "Safarilink Aviation, Air Kenya"],
+    ["Airport", "Malindi Airport", "MYD", "HKML", -3.229311, 40.101694, 1400, 80, "Malindi", "Fly540, Jambojet"],
+    ["Airport", "Ukunda Airport", "UKA", "HKUK", -4.293, 39.571, 1050, 50, "Ukunda", "Safarilink Aviation, Jambojet"],
+    ["Airport", "Lamu Airport", "LAU", "HKLU", -2.252417, 40.913097, 1000, 20, "Lamu", "Fly540, Skyward Express"],
+    ["Airport", "Nanyuki Airport", "NYK", "HKNY", -0.0625, 37.041, 1260, 6250, "Nanyuki", "Safarilink Aviation"],
+    ["Airport", "Amboseli Airport", "ASV", "HKAM", -2.645050, 37.253051, 1200, 3750, "Amboseli", "Safarilink Aviation"],
+    ["Airport", "Mara Serena Airport", "MRE", "HKMS", -1.406111, 35.010833, 1280, 5180, "Masai Mara", "Safarilink Aviation, Air Kenya"],
+    ["Airport", "Kakamega Airport", "GGM", "HKKG", 0.271342, 34.787356, 1300, 5050, "Kakamega", "Fly540"],
+]
+
+# --- 12 Airstrips ---
+airstrips = [
+    ["Airstrip", "Marsabit Airstrip", "MST", "HKMT", 2.33, 38.95, 1200, 5400, "Marsabit", "None"],
+    ["Airstrip", "Isiolo Airstrip", "ISI", "HKIS", 0.35, 37.55, 1000, 3600, "Isiolo", "SafariLink Aviation"],
+    ["Airstrip", "Mandera Airstrip", "MDR", "HKMD", 3.933, 41.85, 900, 1200, "Mandera", "None"],
+    ["Airstrip", "Eldama Ravine Airstrip", "EDR", "HKEV", 0.5167, 35.8833, 800, 4800, "Eldama Ravine", "None"],
+    ["Airstrip", "Kisii Airstrip", "KSB", "HKKS", -0.67, 34.75, 700, 5000, "Kisii", "None"],
+    ["Airstrip", "Kajiado Airstrip", "KJD", "HKKA", -1.85, 36.95, 750, 6000, "Kajiado", "None"],
+    ["Airstrip", "Naivasha Airstrip", "NVH", "HKNV", -0.7167, 36.4333, 800, 6300, "Naivasha", "None"],
+    ["Airstrip", "Voi Airstrip", "VOI", "HKVO", -3.3667, 38.4167, 850, 1800, "Voi", "None"],
+    ["Airstrip", "Narok Airstrip", "NRK", "HKNK", -1.0833, 35.85, 850, 5500, "Narok", "None"],
+    ["Airstrip", "Mwingi Airstrip", "MWI", "HKMW", 0.6667, 38.9167, 650, 4300, "Mwingi", "None"],
+    ["Airstrip", "Embu Airstrip", "EMB", "HKEM", -0.52, 37.45, 700, 5200, "Embu", "None"],
+    ["Airstrip", "Kitale Airstrip", "KTL", "HKKT", 1.0167, 35.0167, 800, 5000, "Kitale", "None"],
+]
+
+# Combine the two lists
+data = airports + airstrips
+
+# Write the data to a CSV file
+with open(csv_filename, mode="w", newline="", encoding="utf-8") as file:
+    writer = csv.writer(file)
+    writer.writerow(header)
+    writer.writerows(data)
+
+print(f"CSV file '{csv_filename}' has been created successfully!")
