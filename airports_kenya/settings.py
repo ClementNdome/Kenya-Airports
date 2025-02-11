@@ -59,7 +59,7 @@ ROOT_URLCONF = "airports_kenya.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [os.path.join(BASE_DIR, "templates")],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -130,3 +130,11 @@ STATIC_URL = "static/"
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+LEAFLET_CONFIG ={
+    "DEFAULT_CENTER": (-1.30, 36.85),
+    "DEFAULT_ZOOM":11,
+    "MAX_ZOOM": 20,
+    "SCALE": "both",
+    "ATTRIBUTE_PREFIX":"Airports",
+}
