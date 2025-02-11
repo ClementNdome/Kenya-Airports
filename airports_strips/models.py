@@ -13,4 +13,14 @@ class Airports(models.Model):
     elevation_field = models.BigIntegerField()
     nearest_to = models.CharField(max_length=254)
     airlines = models.CharField(max_length=254)
-    geom = models.PointField(srid=4326)
+    geom = models.MultiPointField(srid=4326)
+
+    class Meta:
+        indexes=[
+            models.Index(fields=["geom"], name="geom_index")
+        ]
+
+    def __str__(self):
+        return self.name
+    
+
