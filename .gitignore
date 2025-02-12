@@ -1,3 +1,7 @@
+.env
+.gitignore2
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -364,3 +368,4 @@ data/generate_airports_csv.py
 data/genreal code.py
 data/kenya_airports_airstrips.csv
 data/moredata.py
+Pipfile

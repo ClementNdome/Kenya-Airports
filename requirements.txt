@@ -38,3 +38,4 @@ uritemplate==4.1.1
 gunicorn
 dj-database-url
 whitenoise
+python-decouple
