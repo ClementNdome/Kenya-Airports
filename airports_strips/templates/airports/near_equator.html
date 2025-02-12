@@ -1,0 +1,41 @@
+{% load leaflet_tags %}
+<!DOCTYPE html>
+<html>
+<head>
+    {% leaflet_js %}
+    {% leaflet_css %}
+    <title>Airports Within 50 km of the Equator</title>
+    <style>
+        #map {
+            width: 100%;
+            height: 600px;
+        }
+        .airport-list {
+            margin: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <h1>Airports Within 50 km of the Equator</h1>
+    <div class="airport-list">
+        <h2>List of Airports</h2>
+        <ul>
+            {% for airport in airports %}
+                <li>{{ airport.name }} - Distance from Equator: {{ airport.distance.m }} meters</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% leaflet_map "map" callback="window.map_init" %}
+    <script type="text/javascript">
+        function map_init(map, options) {
+            {% for airport in airports %}
+                L.marker([{{ airport.latitude }}, {{ airport.longitude }}]).addTo(map)
+                    .bindPopup("<b>{{ airport.name }}</b><br>Distance from Equator: {{ airport.distance.m }} meters");
+            {% endfor %}
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+{% load leaflet_tags %}
+<!DOCTYPE html>
+<html>
+<head>
+    {% leaflet_js %}
+    {% leaflet_css %}
+    <title>Airports with Runway Length > 1,500 Meters</title>
+    <style>
+        #map {
+            width: 100%;
+            height: 600px;
+        }
+        .airport-list {
+            margin: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <h1>Airports with Runway Length > 1,500 Meters</h1>
+    <div class="airport-list">
+        <h2>List of Airports</h2>
+        <ul>
+            {% for airport in airports %}
+                <li>{{ airport.name }} - Runway Length: {{ airport.runway_len }} meters</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% leaflet_map "map" callback="window.map_init" %}
+    <script type="text/javascript">
+        function map_init(map, options) {
+            {% for airport in airports %}
+                L.marker([{{ airport.latitude }}, {{ airport.longitude }}]).addTo(map)
+                    .bindPopup("<b>{{ airport.name }}</b><br>Runway: {{ airport.runway_len }} meters");
+            {% endfor %}
+        }
+    </script>
+</body>
+</html>

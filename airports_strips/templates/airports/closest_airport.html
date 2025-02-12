@@ -1,0 +1,50 @@
+{% load leaflet_tags %}
+<!DOCTYPE html>
+<html>
+<head>
+    {% leaflet_js %}
+    {% leaflet_css %}
+    <title>Closest Airports to Kakamega and Nairobi</title>
+    <style>
+        #map {
+            width: 100%;
+            height: 600px;
+        }
+        .airport-info {
+            margin: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <h1>Closest Airports to Kakamega and Nairobi</h1>
+    <div class="airport-info">
+        <h2>Closest Airport to Kakamega</h2>
+        <p><strong>Name:</strong> {{ closest_to_kakamega.name }}</p>
+        <p><strong>Distance:</strong> {{ closest_to_kakamega.distance.m }} meters</p>
+    </div>
+    <div class="airport-info">
+        <h2>Closest Airport to Nairobi</h2>
+        <p><strong>Name:</strong> {{ closest_to_nairobi.name }}</p>
+        <p><strong>Distance:</strong> {{ closest_to_nairobi.distance.m }} meters</p>
+    </div>
+    {% leaflet_map "map" callback="window.map_init" %}
+    <script type="text/javascript">
+        function map_init(map, options) {
+            // Add Kakamega and Nairobi markers
+            L.marker([0.2827, 34.7519]).addTo(map)
+                .bindPopup("<b>Kakamega</b>");
+            L.marker([-1.2864, 36.8172]).addTo(map)
+                .bindPopup("<b>Nairobi</b>");
+
+            // Add closest airports
+            L.marker([{{ closest_to_kakamega.latitude }}, {{ closest_to_kakamega.longitude }}]).addTo(map)
+                .bindPopup("<b>{{ closest_to_kakamega.name }}</b><br>Closest to Kakamega");
+            L.marker([{{ closest_to_nairobi.latitude }}, {{ closest_to_nairobi.longitude }}]).addTo(map)
+                .bindPopup("<b>{{ closest_to_nairobi.name }}</b><br>Closest to Nairobi");
+        }
+    </script>
+</body>
+</html>

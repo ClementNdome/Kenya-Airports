@@ -8,7 +8,7 @@ from .models import Airports
 
 
 class AirportsAdmin(LeafletGeoAdmin):
-    list_display = ("name", "icao", "iata", "nearest_to", "runway_len", "airlines")
+    list_display = ("name", "icao", "iata", "nearest_to", "runway_len", "airlines", "latitude","longitude")
 
 
 admin.site.register(Airports, AirportsAdmin)

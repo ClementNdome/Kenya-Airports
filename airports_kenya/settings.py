@@ -39,8 +39,9 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    'airports_strips',
     'leaflet',
+    'airports_strips',
+    
     # 'djangorestframework-gis',
 ]
 
@@ -131,10 +132,11 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-LEAFLET_CONFIG ={
-    "DEFAULT_CENTER": (-1.30, 36.85),
-    "DEFAULT_ZOOM":11,
-    "MAX_ZOOM": 20,
-    "SCALE": "both",
-    "ATTRIBUTE_PREFIX":"Airports",
+LEAFLET_CONFIG = {
+    'DEFAULT_CENTER': (-0.0236, 37.9062),  # Center of Kenya
+    'DEFAULT_ZOOM': 6,
+    'MIN_ZOOM': 3,
+    'MAX_ZOOM': 18,
+    'SCALE': 'both',
+    'ATTRIBUTION_PREFIX': 'Kenya Airports GIS',
 }

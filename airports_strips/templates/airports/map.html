@@ -1,0 +1,226 @@
+{% extends 'base.html' %}
+{% load leaflet_tags %}
+
+{% block map %}
+    {% leaflet_map "map" callback="window.map_init" %}
+    <script type="text/javascript">
+        let map;
+        let currentMarkers = [];
+        let currentLines = [];
+
+        function map_init(mapInstance, options) {
+            map = mapInstance;
+            // Initialize with all airports
+            {% for airport in airports %}
+                addMarker([{{ airport.latitude }}, {{ airport.longitude }}], 
+                         "{{ airport.name }}", 
+                         "Runway: {{ airport.runway_len }}m");
+            {% endfor %}
+            
+            // Add search functionality
+            document.getElementById('global-search').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    performGlobalSearch(this.value);
+                }
+            });
+        }
+
+        function addMarker(coords, title, content) {
+            const marker = L.marker(coords).addTo(map)
+                .bindPopup(`<b>${title}</b><br>${content}`);
+            currentMarkers.push(marker);
+            return marker;
+        }
+
+        function clearMapOverlays() {
+            currentMarkers.forEach(marker => map.removeLayer(marker));
+            currentLines.forEach(line => map.removeLayer(line));
+            currentMarkers = [];
+            currentLines = [];
+        }
+
+        async function performGlobalSearch(query) {
+            try {
+                // First try airport search
+                const airportResponse = await fetch(`/api/airports/?search=${encodeURIComponent(query)}`);
+                const airportData = await airportResponse.json();
+                
+                if (airportData.results.length > 0) {
+                    clearMapOverlays();
+                    airportData.results.forEach(airport => {
+                        const marker = addMarker(
+                            [airport.latitude, airport.longitude],
+                            airport.name,
+                            `Runway: ${airport.runway_len}m<br>IATA: ${airport.iata}`
+                        );
+                        map.fitBounds(marker.getLatLng().toBounds(5000));
+                    });
+                    return;
+                }
+
+                // Fallback to address geocoding
+                const geocodeResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+                const geocodeData = await geocodeResponse.json();
+                
+                if (geocodeData.length > 0) {
+                    clearMapOverlays();
+                    const result = geocodeData[0];
+                    const marker = addMarker(
+                        [result.lat, result.lon],
+                        result.display_name,
+                        "Searched Location"
+                    );
+                    map.fitBounds(marker.getLatLng().toBounds(5000));
+                }
+            } catch (error) {
+                console.error('Search error:', error);
+                alert('Search failed. Please try again.');
+            }
+        }
+
+        // Function to execute advanced filters
+        async function executeSearch() {
+            const option = document.getElementById('search-option').value;
+            const resultsContainer = document.getElementById('results');
+            resultsContainer.innerHTML = ''; // Clear previous results
+
+            if (option === 'long_runway') {
+                // Fetch airports with runway length > 1500m
+                const response = await fetch('/long-runway/');
+                const data = await response.json();
+                clearMapOverlays();
+                data.airports.forEach(airport => {
+                    const marker = addMarker(
+                        [airport.latitude, airport.longitude],
+                        airport.name,
+                        `Runway: ${airport.runway_len}m`
+                    );
+                    resultsContainer.innerHTML += `<p>${airport.name} - Runway: ${airport.runway_len}m</p>`;
+                });
+                if (data.airports.length > 0) {
+                    map.fitBounds(currentMarkers.map(marker => marker.getLatLng()));
+                }
+            } else if (option === 'near_equator') {
+                // Fetch airports within 50km of the equator
+                const response = await fetch('/near-equator/');
+                const data = await response.json();
+                clearMapOverlays();
+                data.airports.forEach(airport => {
+                    const marker = addMarker(
+                        [airport.latitude, airport.longitude],
+                        airport.name,
+                        `Latitude: ${airport.latitude}`
+                    );
+                    resultsContainer.innerHTML += `<p>${airport.name} - Latitude: ${airport.latitude}</p>`;
+                });
+                if (data.airports.length > 0) {
+                    map.fitBounds(currentMarkers.map(marker => marker.getLatLng()));
+                }
+            } else if (option === 'within_radius') {
+                // Fetch airports within a given radius
+                const lat = parseFloat(document.getElementById('lat').value);
+                const lon = parseFloat(document.getElementById('lon').value);
+                const radius = parseFloat(document.getElementById('radius').value);
+                if (isNaN(lat) || isNaN(lon) || isNaN(radius)) {
+                    alert('Please enter valid latitude, longitude, and radius values.');
+                    return;
+                }
+                const response = await fetch(`/within-radius/?lat=${lat}&lon=${lon}&radius=${radius}`);
+                const data = await response.json();
+                clearMapOverlays();
+                data.airports.forEach(airport => {
+                    const marker = addMarker(
+                        [airport.latitude, airport.longitude],
+                        airport.name,
+                        `Distance: ${airport.distance}m`
+                    );
+                    resultsContainer.innerHTML += `<p>${airport.name} - Distance: ${airport.distance}m</p>`;
+                });
+                if (data.airports.length > 0) {
+                    map.fitBounds(currentMarkers.map(marker => marker.getLatLng()));
+                }
+            } else if (option === 'distance_between') {
+                // Calculate distance between two airports
+                const airport1 = document.getElementById('airport1').value;
+                const airport2 = document.getElementById('airport2').value;
+                if (!airport1 || !airport2) {
+                    alert('Please select two airports.');
+                    return;
+                }
+                const response = await fetch(`/distance-between/?airport1=${airport1}&airport2=${airport2}`);
+                const data = await response.json();
+                resultsContainer.innerHTML = `<p>Distance between ${data.airport1.name} and ${data.airport2.name}: ${data.distance_km} km</p>`;
+            } else {
+                alert('Please select a valid filter option.');
+            }
+        }
+
+        // Function to toggle input fields based on selected filter
+        function toggleInputs() {
+            const option = document.getElementById('search-option').value;
+            const container = document.getElementById('dynamic-inputs');
+            container.innerHTML = '';
+
+            if (option === 'within_radius') {
+                container.innerHTML = `
+                    <div class="input-row">
+                        <label>Latitude:</label>
+                        <input type="number" id="lat" step="any" placeholder="e.g., -1.2864">
+                    </div>
+                    <div class="input-row">
+                        <label>Longitude:</label>
+                        <input type="number" id="lon" step="any" placeholder="e.g., 36.8172">
+                    </div>
+                    <div class="input-row">
+                        <label>Radius (meters):</label>
+                        <input type="number" id="radius" placeholder="e.g., 50000">
+                    </div>
+                `;
+            } else if (option === 'distance_between') {
+                container.innerHTML = `
+                    <div class="input-row">
+                        <label>Airport 1:</label>
+                        <select id="airport1">
+                            <option value="">Select Airport 1</option>
+                            {% for airport in airports %}
+                                <option value="{{ airport.id }}">{{ airport.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="input-row">
+                        <label>Airport 2:</label>
+                        <select id="airport2">
+                            <option value="">Select Airport 2</option>
+                            {% for airport in airports %}
+                                <option value="{{ airport.id }}">{{ airport.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                `;
+            }
+        }
+    </script>
+{% endblock %}
+
+{% block panel %}
+<div class="search-box">
+    <div class="filter-header">
+        <h3><i class="fas fa-filter"></i> Advanced Filters</h3>
+    </div>
+    <select id="search-option" class="form-select" onchange="toggleInputs()">
+        <option value="">Select a filter...</option>
+        <option value="long_runway">Runways > 1,500m</option>
+        <option value="near_equator">Within 50km of Equator</option>
+        <option value="within_radius">Within Radius</option>
+        <option value="distance_between">Distance Between Airports</option>
+    </select>
+    
+    <div id="dynamic-inputs" class="input-group"></div>
+    
+    <button class="search-button" onclick="executeSearch()">
+        <i class="fas fa-search"></i> Apply Filter
+    </button>
+    
+    <div id="results" class="results"></div>
+</div>
+{% endblock %}
