@@ -78,7 +78,6 @@
             }
         }
 
-        // Function to execute advanced filters
         async function executeSearch() {
             const option = document.getElementById('search-option').value;
             const resultsContainer = document.getElementById('results');
@@ -132,9 +131,9 @@
                     const marker = addMarker(
                         [airport.latitude, airport.longitude],
                         airport.name,
-                        `Distance: ${airport.distance}m`
+                        `Distance: ${airport.distance.toFixed(2)}m`
                     );
-                    resultsContainer.innerHTML += `<p>${airport.name} - Distance: ${airport.distance}m</p>`;
+                    resultsContainer.innerHTML += `<p>${airport.name} - Distance: ${airport.distance.toFixed(2)}m</p>`;
                 });
                 if (data.airports.length > 0) {
                     map.fitBounds(currentMarkers.map(marker => marker.getLatLng()));
@@ -150,12 +149,29 @@
                 const response = await fetch(`/distance-between/?airport1=${airport1}&airport2=${airport2}`);
                 const data = await response.json();
                 resultsContainer.innerHTML = `<p>Distance between ${data.airport1.name} and ${data.airport2.name}: ${data.distance_km} km</p>`;
-            } else {
-                alert('Please select a valid filter option.');
+
+                // Draw a line between the two airports
+                const latLng1 = L.latLng(data.airport1.latitude, data.airport1.longitude);
+                const latLng2 = L.latLng(data.airport2.latitude, data.airport2.longitude);
+                const line = L.polyline([latLng1, latLng2], {color: 'red'}).addTo(map);
+                line.bindPopup(`Distance: ${data.distance_km} km`).openPopup();
+                currentLines.push(line);
+            } else if (option === 'closest_to_kakamega') {
+                // Fetch closest airport to Kakamega
+                const response = await fetch('/closest-airports/');
+                const data = await response.json();
+                clearMapOverlays();
+                const closestToKakamega = data.closest_to_kakamega;
+                const marker = addMarker(
+                    [closestToKakamega.latitude, closestToKakamega.longitude],
+                    closestToKakamega.name,
+                    `Distance: ${closestToKakamega.distance.toFixed(2)}m`
+                );
+                resultsContainer.innerHTML = `<p>Closest to Kakamega: ${closestToKakamega.name} - Distance: ${closestToKakamega.distance.toFixed(2)}m</p>`;
+                map.fitBounds(marker.getLatLng().toBounds(5000));
             }
         }
 
-        // Function to toggle input fields based on selected filter
         function toggleInputs() {
             const option = document.getElementById('search-option').value;
             const container = document.getElementById('dynamic-inputs');
@@ -173,7 +189,7 @@
                     </div>
                     <div class="input-row">
                         <label>Radius (meters):</label>
-                        <input type="number" id="radius" placeholder="e.g., 50000">
+                        <input type="number" id="radius" placeholder="e.g., 500">
                     </div>
                 `;
             } else if (option === 'distance_between') {
@@ -199,6 +215,29 @@
                 `;
             }
         }
+
+        // Handle "Airports Near Me" functionality
+        map.on('click', async (event) => {
+            const lat = event.latlng.lat;
+            const lon = event.latlng.lng;
+
+            // Add a marker at the clicked location
+            const marker = L.marker([lat, lon]).addTo(map)
+                .bindPopup('Your Location');
+
+            // Find the nearest airport
+            const response = await fetch(`/nearest-airport/?lat=${lat}&lon=${lon}`);
+            const data = await response.json();
+
+            // Add a marker for the nearest airport
+            const airportMarker = L.marker([data.latitude, data.longitude]).addTo(map)
+                .bindPopup(`Nearest Airport: ${data.name}<br>Distance: ${data.distance.toFixed(2)} km`);
+
+            // Draw a line between the clicked location and the nearest airport
+            const line = L.polyline([[lat, lon], [data.latitude, data.longitude]], {color: 'blue'}).addTo(map);
+            line.bindPopup(`Distance: ${data.distance.toFixed(2)} km`).openPopup();
+            currentLines.push(line);
+        });
     </script>
 {% endblock %}
 
@@ -213,6 +252,7 @@
         <option value="near_equator">Within 50km of Equator</option>
         <option value="within_radius">Within Radius</option>
         <option value="distance_between">Distance Between Airports</option>
+        <option value="closest_to_kakamega">Closest Airport to Kakamega</option>
     </select>
     
     <div id="dynamic-inputs" class="input-group"></div>

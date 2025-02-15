@@ -1,0 +1,205 @@
+{% extends 'base.html' %}
+{% load leaflet_tags %}  <!-- Ensure Leaflet tags are loaded -->
+
+{% block map %}
+    {% leaflet_map "exploreMap" callback="window.exploreMapInit" %}
+    <script type="text/javascript" src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
+    <script type="text/javascript">
+        function exploreMapInit(mapInstance, options) {
+            const map = mapInstance;
+
+            // Add base layers
+            const streetView = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            });
+
+            const satelliteView = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '© Esri'
+            });
+
+            // Create a marker cluster group
+            const markers = L.markerClusterGroup();
+
+            // Add markers for all airports
+            {% for airport in airports %}
+                const marker = L.marker([{{ airport.latitude }}, {{ airport.longitude }}])
+                    .bindPopup(`
+                        <b>{{ airport.name }}</b><br>
+                        Runway: {{ airport.runway_len }}m<br>
+                        Elevation: {{ airport.elevation_field }}m<br>
+                        Nearest City: {{ airport.nearest_to }}
+                    `);
+                markers.addLayer(marker);
+            {% endfor %}
+
+            // Add heatmap layer
+            const airportCoords = [
+                {% for airport in airports %}
+                    [{{ airport.latitude }}, {{ airport.longitude }}],
+                {% endfor %}
+            ];
+            const heatmapLayer = L.heatLayer(airportCoords, { radius: 25 });
+
+            // Add layers to the map
+            streetView.addTo(map);
+            map.addLayer(markers);
+
+            // Add layer control
+            const baseLayers = {
+                "Street View": streetView,
+                "Satellite View": satelliteView,
+            };
+
+            const overlays = {
+                "Airports": markers,
+                "Heatmap": heatmapLayer,
+            };
+
+            L.control.layers(baseLayers, overlays).addTo(map);
+
+            // Add search functionality
+            document.getElementById('search-airport').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    const query = this.value.toLowerCase();
+                    let foundMarker = null;
+                    markers.eachLayer(marker => {
+                        if (marker.getPopup().getContent().toLowerCase().includes(query)) {
+                            foundMarker = marker;
+                        }
+                    });
+                    if (foundMarker) {
+                        map.setView(foundMarker.getLatLng(), 10);
+                        foundMarker.openPopup();
+                    } else {
+                        alert('Airport not found.');
+                    }
+                }
+            });
+
+            // Fit the map to show all airports
+            const bounds = L.latLngBounds(airportCoords);
+            map.fitBounds(bounds);
+        }
+    </script>
+{% endblock %}
+
+{% block panel %}
+<div class="explore-content">
+    <h2>Explore Kenya Airports</h2>
+    
+    <!-- Search Bar -->
+    <div class="search-bar">
+        <input type="text" id="search-airport" placeholder="Search for an airport...">
+    </div>
+
+    <!-- Runway Length Distribution -->
+    <div class="charts">
+        <h3>Runway Length Distribution</h3>
+        <canvas id="runwayChart" width="400" height="200"></canvas>
+    </div>
+
+    <!-- Airport Type Distribution -->
+    <div class="charts">
+        <h3>Airport Type Distribution</h3>
+        <canvas id="typeChart" width="400" height="200"></canvas>
+    </div>
+
+    <!-- Elevation Distribution -->
+    <div class="charts">
+        <h3>Elevation Distribution</h3>
+        <canvas id="elevationChart" width="400" height="200"></canvas>
+    </div>
+
+    <!-- Statistics -->
+    <div class="statistics">
+        <h3>Airport Statistics</h3>
+        <p>Total Airports: {{ airports.count }}</p>
+        <p>Average Runway Length: {{ avg_runway_length|default:"N/A" }} meters</p>
+        <p>Highest Elevation: {{ max_elevation|default:"N/A" }} meters</p>
+        
+        <h4>Airports Per Region</h4>
+        <ul>
+            {% for region in airports_per_region %}
+                <li>{{ region.nearest_to }}: {{ region.count }} airports</li>
+            {% endfor %}
+        </ul>
+        
+        <h4>Airlines Operating at Airports</h4>
+        <ul>
+            {% for airport in airlines_data %}
+                <li>{{ airport.name }}: {{ airport.airlines }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    // Chart for Runway Length Distribution
+    const runwayData = {
+        labels: ["< 1000m", "1000-2000m", "> 2000m"],
+        datasets: [{
+            label: 'Number of Airports',
+            data: [{{ short_runways }}, {{ medium_runways }}, {{ long_runways }}],
+            backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56'],
+        }]
+    };
+
+    const runwayChart = new Chart(document.getElementById('runwayChart'), {
+        type: 'bar',
+        data: runwayData,
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+
+    // Chart for Airport Type Distribution
+    const typeData = {
+        labels: [{% for type in airport_types %}"{{ type.type }}",{% endfor %}],
+        datasets: [{
+            label: 'Number of Airports',
+            data: [{% for type in airport_types %}{{ type.count }},{% endfor %}],
+            backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'],
+        }]
+    };
+
+    const typeChart = new Chart(document.getElementById('typeChart'), {
+        type: 'pie',
+        data: typeData,
+        options: {
+            responsive: true,
+        }
+    });
+
+    // Chart for Elevation Distribution
+    const elevationData = {
+        labels: [{% for elevation in elevation_data %}"{{ elevation }}",{% endfor %}],
+        datasets: [{
+            label: 'Elevation (meters)',
+            data: [{% for elevation in elevation_data %}{{ elevation }},{% endfor %}],
+            borderColor: '#36A2EB',
+            fill: false,
+        }]
+    };
+
+    const elevationChart = new Chart(document.getElementById('elevationChart'), {
+        type: 'line',
+        data: elevationData,
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+</script>
+{% endblock %}
