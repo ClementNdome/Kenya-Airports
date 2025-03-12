@@ -1,4 +1,4 @@
-# Kenya Airports Web GIS Application
+# Kenya Airports Web GIS Application (Django)
 
 ## Project Overview
 This project is a Web GIS application developed using Django and GeoDjango to visualize and analyze airports and airstrips in Kenya. The application connects to a spatial database (PostgreSQL + PostGIS) and provides various GIS functionalities, including spatial queries and proximity analysis.
@@ -74,7 +74,7 @@ Ensure you have the following installed:
 
 ## Live Demo
 This application is hosted live at Render:
-[Kenya Airports Web GIS](https://kenya-airports.onrender.com/)
+[kenya-airports.onrender.com/](https://kenya-airports.onrender.com/)
 
 ## Usage
 - Use the interactive map to view and analyze airport locations.
