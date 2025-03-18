@@ -140,7 +140,7 @@ STATIC_URL = "static/"
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
 
-GDAL_LIBRARY_PATH = os.environ.get("GDAL_LIBRARY_PATH", "C:/OSGeo4W/bin/gdal310.dll")
+# GDAL_LIBRARY_PATH = os.environ.get("GDAL_LIBRARY_PATH", "C:/OSGeo4W/bin/gdal310.dll")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
