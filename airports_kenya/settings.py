@@ -11,7 +11,7 @@ SECRET_KEY = config("SECRET_KEY")  # <-- Read from .env
 
 # SECURITY WARNING: don't run with debug turned on in production!
 # DEBUG = config('DEBUG', default=False, cast=bool)  # <-- Read from .env
-DEBUG = True
+DEBUG = False
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="*").split(",")  # <-- Read from .env
 ALLOWED_HOSTS = ["*"]
 
@@ -19,16 +19,16 @@ ALLOWED_HOSTS = ["*"]
 
 # enable this while working locally and ensure it is commnented while pushing to production
 # Configure GDAL (for Windows)
-# if os.name == 'nt':  # Only for Windows
-#     # Path to your GDAL DLL (adjust version if needed)
-#     GDAL_LIBRARY_PATH = r'C:\OSGeo4W\bin\gdal310.dll'
+if os.name == 'nt':  # Only for Windows
+    # Path to your GDAL DLL (adjust version if needed)
+    GDAL_LIBRARY_PATH = r'C:\OSGeo4W\bin\gdal310.dll'
     
-#     # Optional: Set other GDAL environment variables
-#     OSGEO4W_PATH = r'C:\OSGeo4W'
-#     os.environ['OSGEO4W_ROOT'] = OSGEO4W_PATH
-#     os.environ['GDAL_DATA'] = os.path.join(OSGEO4W_PATH, 'share', 'gdal')
-#     os.environ['PROJ_LIB'] = os.path.join(OSGEO4W_PATH, 'share', 'proj')
-#     os.environ['PATH'] = OSGEO4W_PATH + r'\bin;' + os.environ['PATH']
+    # Optional: Set other GDAL environment variables
+    OSGEO4W_PATH = r'C:\OSGeo4W'
+    os.environ['OSGEO4W_ROOT'] = OSGEO4W_PATH
+    os.environ['GDAL_DATA'] = os.path.join(OSGEO4W_PATH, 'share', 'gdal')
+    os.environ['PROJ_LIB'] = os.path.join(OSGEO4W_PATH, 'share', 'proj')
+    os.environ['PATH'] = OSGEO4W_PATH + r'\bin;' + os.environ['PATH']
 
 # Application definition
 
@@ -90,20 +90,29 @@ WSGI_APPLICATION = "airports_kenya.wsgi.application"
 #     )
 # }
 
+
 DATABASES = {
     "default": {
         "ENGINE": "django.contrib.gis.db.backends.postgis",
-        "NAME": "airports_db",  # Your created database name
-        "USER": "avnadmin",
-        "PASSWORD": "AVNS_Nw_acP_1et7TIqtP57w",
-        "HOST": "pg-clement-clemo-d16a.i.aivencloud.com",
-        "PORT": "11980",
+        "NAME": config("DB_NAME", default="airports_db"),
+        "USER": config("DB_USER", default="avnadmin"),
+        "PASSWORD": config("DB_PASSWORD", default=""),
+        "HOST": config("DB_HOST", default="localhost"),
+        "PORT": config("DB_PORT", default="5432", cast=int),
         "OPTIONS": {
-            "sslmode": "require",
+            "sslmode": config("DB_SSLMODE", default="require"),
         },
     }
 }
 
+# Optional: Add database URL support as fallback
+DATABASE_URL = config("DATABASE_URL", default=None)
+if DATABASE_URL:
+    DATABASES["default"] = dj_database_url.parse(
+        DATABASE_URL,
+        engine="django.contrib.gis.db.backends.postgis",
+        conn_max_age=600,
+    )
 # reference
 #  default="postgresql://airports_628w_user:kT2Hy7DSDYcC5fCAUNBdO2EUVDaH3X7n@dpg-cumdmuggph6c73dfp4cg-a.oregon-postgres.render.com/airports_628w",
 
