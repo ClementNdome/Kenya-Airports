@@ -81,14 +81,7 @@ WSGI_APPLICATION = "airports_kenya.wsgi.application"
 
 
 
-# DATABASES = {
-#     "default": dj_database_url.parse(
-#         "postgresql://clement:Up6a3edeYjtqlSTl3zTotigCYnx5HEOI@dpg-cvcttqlds78s7384ktl0-a.oregon-postgres.render.com/airports_pm8r",
-#         engine="django.contrib.gis.db.backends.postgis",
-#         conn_max_age=600,
-#         ssl_require=True,  # Enable SSL
-#     )
-# }
+
 
 
 DATABASES = {
@@ -113,9 +106,6 @@ if DATABASE_URL:
         engine="django.contrib.gis.db.backends.postgis",
         conn_max_age=600,
     )
-# reference
-#  default="postgresql://airports_628w_user:kT2Hy7DSDYcC5fCAUNBdO2EUVDaH3X7n@dpg-cumdmuggph6c73dfp4cg-a.oregon-postgres.render.com/airports_628w",
-
 
 # local database for local testing
 # DATABASES = {
