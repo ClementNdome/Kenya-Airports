@@ -22,7 +22,6 @@ pathspec==0.12.1
 pillow==11.1.0
 platformdirs==4.3.6
 psycopg==3.2.4
-psycopg2==2.9.10
 psycopg2-binary==2.9.10
 python-dateutil==2.9.0.post0
 pytz==2025.1
