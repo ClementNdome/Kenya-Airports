@@ -12,7 +12,7 @@ SECRET_KEY = config("SECRET_KEY")  # <-- Read from .env
 # SECURITY WARNING: don't run with debug turned on in production!
 # DEBUG = config('DEBUG', default=False, cast=bool)  # <-- Read from .env
 DEBUG = False
-ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="*").split(",")  # <-- Read from .env
+# ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="*").split(",")  # <-- Read from .env
 ALLOWED_HOSTS = ["*"]
 
 
@@ -87,11 +87,11 @@ WSGI_APPLICATION = "airports_kenya.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.contrib.gis.db.backends.postgis",
-        "NAME": config("DB_NAME", default="airports_db"),
-        "USER": config("DB_USER", default="avnadmin"),
-        "PASSWORD": config("DB_PASSWORD", default=""),
-        "HOST": config("DB_HOST", default="localhost"),
-        "PORT": config("DB_PORT", default="5432", cast=int),
+        "NAME": config("DB_NAME"),
+        "USER": config("DB_USER"),
+        "PASSWORD": config("DB_PASSWORD"),
+        "HOST": config("DB_HOST"),
+        "PORT": config("DB_PORT"),
         "OPTIONS": {
             "sslmode": config("DB_SSLMODE", default="require"),
         },
@@ -99,19 +99,19 @@ DATABASES = {
 }
 
 # Optional: Add database URL support as fallback
-DATABASE_URL = config("DATABASE_URL", default=None)
-if DATABASE_URL:
-    DATABASES["default"] = dj_database_url.parse(
-        DATABASE_URL,
-        engine="django.contrib.gis.db.backends.postgis",
-        conn_max_age=600,
-    )
+# DATABASE_URL = config("DATABASE_URL", default=None)
+# if DATABASE_URL:
+#     DATABASES["default"] = dj_database_url.parse(
+#         DATABASE_URL,
+#         engine="django.contrib.gis.db.backends.postgis",
+#         conn_max_age=600,
+#     )
 
 # local database for local testing
 # DATABASES = {
 #     "default": {
 #         "ENGINE": "django.contrib.gis.db.backends.postgis",
-#         "NAME": "airports",
+#         "NAME": "airport_db",
 #         "USER": "postgres",
 #         "HOST": "localhost",
 #         "PASSWORD": "0323",
