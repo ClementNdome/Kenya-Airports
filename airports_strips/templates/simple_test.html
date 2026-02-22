@@ -1,0 +1,22 @@
+<!-- templates/simple_test.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Test</title>
+    {% load leaflet_tags %}
+    {% leaflet_js %}
+    {% leaflet_css %}
+</head>
+<body>
+    <h1>Simple Map Test</h1>
+    <p>If this works, you should see a map below:</p>
+    {% leaflet_map "test_map" %}
+    
+    <h2>Airport Count: {{ airport_count }}</h2>
+    <ul>
+        {% for airport in airports %}
+            <li>{{ airport.name }} - {{ airport.latitude }}, {{ airport.longitude }}</li>
+        {% endfor %}
+    </ul>
+</body>
+</html>
