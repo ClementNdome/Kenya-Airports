@@ -19,16 +19,16 @@ ALLOWED_HOSTS = ["*"]
 
 # enable this while working locally and ensure it is commnented while pushing to production
 # Configure GDAL (for Windows)
-# if os.name == 'nt':  # Only for Windows
-#     # Path to your GDAL DLL (adjust version if needed)
-#     GDAL_LIBRARY_PATH = r'C:\OSGeo4W\bin\gdal310.dll'
+if os.name == 'nt':  # Only for Windows
+    # Path to your GDAL DLL (adjust version if needed)
+    GDAL_LIBRARY_PATH = r'C:\OSGeo4W\bin\gdal310.dll'
     
-#     # Optional: Set other GDAL environment variables
-#     OSGEO4W_PATH = r'C:\OSGeo4W'
-#     os.environ['OSGEO4W_ROOT'] = OSGEO4W_PATH
-#     os.environ['GDAL_DATA'] = os.path.join(OSGEO4W_PATH, 'share', 'gdal')
-#     os.environ['PROJ_LIB'] = os.path.join(OSGEO4W_PATH, 'share', 'proj')
-#     os.environ['PATH'] = OSGEO4W_PATH + r'\bin;' + os.environ['PATH']
+    # Optional: Set other GDAL environment variables
+    OSGEO4W_PATH = r'C:\OSGeo4W'
+    os.environ['OSGEO4W_ROOT'] = OSGEO4W_PATH
+    os.environ['GDAL_DATA'] = os.path.join(OSGEO4W_PATH, 'share', 'gdal')
+    os.environ['PROJ_LIB'] = os.path.join(OSGEO4W_PATH, 'share', 'proj')
+    os.environ['PATH'] = OSGEO4W_PATH + r'\bin;' + os.environ['PATH']
 
 # Application definition
 
@@ -92,13 +92,13 @@ DATABASES = {
         "PASSWORD": config("DB_PASSWORD"),
         "HOST": config("DB_HOST"),
         "PORT": config("DB_PORT"),
-        "OPTIONS": {
-            "sslmode": config("DB_SSLMODE", default="require"),
-        },
+        # "OPTIONS": {
+        #     "sslmode": config("DB_SSLMODE", default="require"),
+        # },
     }
 }
 
-# Optional: Add database URL support as fallback
+# # Optional: Add database URL support as fallback
 # DATABASE_URL = config("DATABASE_URL", default=None)
 # if DATABASE_URL:
 #     DATABASES["default"] = dj_database_url.parse(
