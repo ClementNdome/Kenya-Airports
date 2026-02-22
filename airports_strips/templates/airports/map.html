@@ -1,6 +1,298 @@
 {% extends 'base.html' %}
 {% load leaflet_tags %}
 
+{% block extra_head %}
+<style>
+    /* Enhanced styling to match explore page */
+    body {
+        font-family: 'Arial', sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+    }
+
+    .navbar {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+        padding: 15px 30px;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .navbar a {
+        color: #2c3e50;
+        text-decoration: none;
+        padding: 12px 20px;
+        border-radius: 25px;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 500;
+        font-size: 16px;
+    }
+
+    .navbar a:hover {
+        background: linear-gradient(135deg, #1E90FF 0%, #FF6347 100%);
+        color: white;
+        transform: translateY(-2px);
+    }
+
+    .search-bar {
+        flex-grow: 1;
+        max-width: 400px;
+    }
+
+    .search-bar input {
+        width: 100%;
+        padding: 15px;
+        border: 2px solid #e8f4f8;
+        border-radius: 15px;
+        font-size: 14px;
+        background: #f8fbfc;
+        transition: all 0.3s ease;
+    }
+
+    .search-bar input:focus {
+        outline: none;
+        border-color: #3498db;
+        background: white;
+        box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+    }
+
+    .container {
+        display: flex;
+        height: calc(100vh - 140px);
+        background: transparent;
+    }
+
+    .panel {
+        flex: 0 0 350px;
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+        border-right: 1px solid rgba(255, 255, 255, 0.2);
+        overflow-y: auto;
+        box-shadow: 4px 0 20px rgba(0,0,0,0.1);
+    }
+
+    .map-container {
+        flex: 1;
+        height: 100%;
+        position: relative;
+        background: transparent;
+    }
+
+    /* Enhanced search box styling */
+    .search-box {
+        padding: 25px;
+    }
+
+    .filter-header {
+        margin: 0 0 25px 0;
+        padding-bottom: 15px;
+        border-bottom: 2px solid #e8f4f8;
+    }
+
+    .filter-header h3 {
+        margin: 0;
+        color: #2c3e50;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 18px;
+        font-weight: 600;
+    }
+
+    .form-select {
+        width: 100%;
+        padding: 15px;
+        border: 2px solid #e8f4f8;
+        border-radius: 12px;
+        font-size: 14px;
+        background: #f8fbfc;
+        margin-bottom: 20px;
+        transition: all 0.3s ease;
+    }
+
+    .form-select:focus {
+        outline: none;
+        border-color: #3498db;
+        background: white;
+        box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+    }
+
+    .input-group {
+        margin-bottom: 20px;
+    }
+
+    .input-row {
+        margin: 15px 0;
+        display: grid;
+        grid-template-columns: 1fr 2fr;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .input-row label {
+        color: #2c3e50;
+        font-weight: 500;
+        font-size: 14px;
+    }
+
+    .input-row input,
+    .input-row select {
+        padding: 12px;
+        border: 2px solid #e8f4f8;
+        border-radius: 8px;
+        font-size: 14px;
+        background: #f8fbfc;
+        transition: all 0.3s ease;
+    }
+
+    .input-row input:focus,
+    .input-row select:focus {
+        outline: none;
+        border-color: #3498db;
+        background: white;
+    }
+
+    .search-button {
+        width: 100%;
+        padding: 16px;
+        background: linear-gradient(135deg, #1E90FF 0%, #FF6347 100%);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3);
+    }
+
+    .search-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(30, 144, 255, 0.4);
+    }
+
+    .results {
+        margin-top: 25px;
+        padding: 20px;
+        background: #f8fbfc;
+        border-radius: 12px;
+        border: 1px solid #e8f4f8;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .results p {
+        margin: 10px 0;
+        padding: 12px;
+        background: white;
+        border-radius: 8px;
+        border-left: 4px solid #1E90FF;
+        font-size: 14px;
+        color: #2c3e50;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+
+    /* Footer styling */
+    .footer {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+        padding: 15px 30px;
+        text-align: center;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        color: #2c3e50;
+        font-size: 14px;
+        box-shadow: 0 -4px 20px rgba(0,0,0,0.1);
+    }
+
+    .footer a {
+        color: #1E90FF;
+        text-decoration: none;
+        font-weight: 600;
+    }
+
+    .footer a:hover {
+        color: #FF6347;
+    }
+
+    /* Custom scrollbar */
+    .panel::-webkit-scrollbar,
+    .results::-webkit-scrollbar {
+        width: 6px;
+    }
+
+    .panel::-webkit-scrollbar-track,
+    .results::-webkit-scrollbar-track {
+        background: #f1f2f6;
+        border-radius: 3px;
+    }
+
+    .panel::-webkit-scrollbar-thumb,
+    .results::-webkit-scrollbar-thumb {
+        background: linear-gradient(135deg, #1E90FF, #FF6347);
+        border-radius: 3px;
+    }
+
+    /* Leaflet map enhancements */
+    .leaflet-container {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    }
+
+    .leaflet-popup-content {
+        font-family: 'Arial', sans-serif;
+    }
+
+    .leaflet-popup-content-wrapper {
+        border-radius: 12px;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+    }
+
+    /* Responsive design */
+    @media (max-width: 768px) {
+        .container {
+            flex-direction: column;
+            height: auto;
+        }
+        
+        .panel {
+            flex: 0 0 auto;
+            max-height: 40vh;
+        }
+        
+        .map-container {
+            height: 50vh;
+        }
+        
+        .navbar {
+            padding: 12px 20px;
+            flex-wrap: wrap;
+        }
+        
+        .search-bar {
+            max-width: 100%;
+            order: 3;
+            margin-top: 10px;
+        }
+        
+        .input-row {
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block map %}
     {% leaflet_map "map" callback="window.map_init" %}
     <script type="text/javascript">
@@ -10,6 +302,10 @@
 
         function map_init(mapInstance, options) {
             map = mapInstance;
+            
+            // Add a nice gradient background to the map
+            map.getContainer().style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+            
             // Initialize with all airports
             {% for airport in airports %}
                 addMarker([{{ airport.latitude }}, {{ airport.longitude }}], 
@@ -27,7 +323,14 @@
 
         function addMarker(coords, title, content) {
             const marker = L.marker(coords).addTo(map)
-                .bindPopup(`<b>${title}</b><br>${content}`);
+                .bindPopup(`
+                    <div style="font-family: Arial, sans-serif; min-width: 200px;">
+                        <h4 style="margin: 0 0 8px 0; color: #2c3e50; border-bottom: 2px solid #1E90FF; padding-bottom: 5px;">
+                            <i class="fas fa-plane" style="color: #1E90FF;"></i> ${title}
+                        </h4>
+                        <p style="margin: 8px 0; color: #7f8c8d;">${content}</p>
+                    </div>
+                `);
             currentMarkers.push(marker);
             return marker;
         }
@@ -153,7 +456,7 @@
                 // Draw a line between the two airports
                 const latLng1 = L.latLng(data.airport1.latitude, data.airport1.longitude);
                 const latLng2 = L.latLng(data.airport2.latitude, data.airport2.longitude);
-                const line = L.polyline([latLng1, latLng2], {color: 'red'}).addTo(map);
+                const line = L.polyline([latLng1, latLng2], {color: '#FF6347', weight: 3}).addTo(map);
                 line.bindPopup(`Distance: ${data.distance_km} km`).openPopup();
                 currentLines.push(line);
             } else if (option === 'closest_to_kakamega') {
@@ -223,7 +526,7 @@
 
             // Add a marker at the clicked location
             const marker = L.marker([lat, lon]).addTo(map)
-                .bindPopup('Your Location');
+                .bindPopup('<div style="font-family: Arial, sans-serif;"><strong><i class="fas fa-location-dot"></i> Your Location</strong></div>');
 
             // Find the nearest airport
             const response = await fetch(`/nearest-airport/?lat=${lat}&lon=${lon}`);
@@ -231,10 +534,10 @@
 
             // Add a marker for the nearest airport
             const airportMarker = L.marker([data.latitude, data.longitude]).addTo(map)
-                .bindPopup(`Nearest Airport: ${data.name}<br>Distance: ${data.distance.toFixed(2)} km`);
+                .bindPopup(`<div style="font-family: Arial, sans-serif;"><strong>Nearest Airport: ${data.name}</strong><br>Distance: ${data.distance.toFixed(2)} km</div>`);
 
             // Draw a line between the clicked location and the nearest airport
-            const line = L.polyline([[lat, lon], [data.latitude, data.longitude]], {color: 'blue'}).addTo(map);
+            const line = L.polyline([[lat, lon], [data.latitude, data.longitude]], {color: '#1E90FF', weight: 3}).addTo(map);
             line.bindPopup(`Distance: ${data.distance.toFixed(2)} km`).openPopup();
             currentLines.push(line);
         });
@@ -262,5 +565,11 @@
     </button>
     
     <div id="results" class="results"></div>
+</div>
+{% endblock %}
+
+{% block footer %}
+<div class="footer">
+    <p>&copy; 2025 Kenya Airports GIS | Developed by <a href="#" target="_blank">Clement Ndome</a></p>
 </div>
 {% endblock %}
