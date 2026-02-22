@@ -1,0 +1,9 @@
+.git
+.gitignore
+.env
+*.pyc
+__pycache__
+staticfiles
+db.sqlite3
+Dockerfile
+fly.toml
