@@ -43,7 +43,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "airports_strips",
     "leaflet",
-    # 'airports_strips',
+    'obstacle_compliance', #newapp
     # 'djangorestframework-gis',
 ]
 MIDDLEWARE = [
@@ -84,19 +84,19 @@ WSGI_APPLICATION = "airports_kenya.wsgi.application"
 
 
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.contrib.gis.db.backends.postgis",
-        "NAME": config("DB_NAME"),
-        "USER": config("DB_USER"),
-        "PASSWORD": config("DB_PASSWORD"),
-        "HOST": config("DB_HOST"),
-        "PORT": config("DB_PORT"),
-        # "OPTIONS": {
-        #     "sslmode": config("DB_SSLMODE", default="require"),
-        # },
-    }
-}
+# DATABASES = {
+#     "default": {
+#         "ENGINE": "django.contrib.gis.db.backends.postgis",
+#         "NAME": config("DB_NAME"),
+#         "USER": config("DB_USER"),
+#         "PASSWORD": config("DB_PASSWORD"),
+#         "HOST": config("DB_HOST"),
+#         "PORT": config("DB_PORT"),
+#         # "OPTIONS": {
+#         #     "sslmode": config("DB_SSLMODE", default="require"),
+#         # },
+#     }
+# }
 
 # # Optional: Add database URL support as fallback
 # DATABASE_URL = config("DATABASE_URL", default=None)
@@ -108,16 +108,16 @@ DATABASES = {
 #     )
 
 # local database for local testing
-# DATABASES = {
-#     "default": {
-#         "ENGINE": "django.contrib.gis.db.backends.postgis",
-#         "NAME": "airport_db",
-#         "USER": "postgres",
-#         "HOST": "localhost",
-#         "PASSWORD": "0323",
-#         "PORT": "5432",
-#     }
-# }
+DATABASES = {
+    "default": {
+        "ENGINE": "django.contrib.gis.db.backends.postgis",
+        "NAME": "airport_db",
+        "USER": "postgres",
+        "HOST": "localhost",
+        "PASSWORD": "0323",
+        "PORT": "5432",
+    }
+}
 
 
 AUTH_PASSWORD_VALIDATORS = [
