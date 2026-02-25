@@ -157,22 +157,29 @@
     let map;
     let airportsLayer;
     let bufferLayers = {};
-    let currentRadius = {{ default_radius }};
+    let currentRadius = {{ default_radius|default:15 }};
     
     document.addEventListener('DOMContentLoaded', function() {
-        // Initialize map
-        map = L.map('fullscreenMap').setView([-1.2864, 36.8172], 8);
+        // Initialize map with fallback coordinates
+        const center = [{{ map_center.0|default:-1.2864 }}, {{ map_center.1|default:36.8172 }}];
+        const zoom = {{ map_zoom|default:8 }};
+        
+        map = L.map('fullscreenMap').setView(center, zoom);
         
         // Base layers
         const baseLayers = {
             'Streets': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                subdomains: 'abcd',
+                maxZoom: 19
             }),
             'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri'
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+                maxZoom: 18
             }),
             'Terrain': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-                attribution: 'Map data: &copy; OpenTopoMap'
+                attribution: 'Map data: &copy; <a href="https://www.opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)',
+                maxZoom: 17
             })
         };
         
@@ -182,25 +189,43 @@
         // Layer control
         L.control.layers(baseLayers).addTo(map);
         
-        // Load data
+        // Add scale bar
+        L.control.scale({ imperial: false, metric: true }).addTo(map);
+        
+        // Load data with error handling
         loadAirports();
         loadBuffers(currentRadius);
         
-        // Event listeners
-        document.getElementById('showAirports').addEventListener('change', toggleAirports);
-        document.getElementById('showBuffers').addEventListener('change', toggleBuffers);
-        document.getElementById('radiusSlider').addEventListener('input', updateRadius);
-        document.getElementById('airportType').addEventListener('change', filterAirports);
-        document.getElementById('searchAirport').addEventListener('input', filterAirports);
+        // Event listeners with null checks
+        const showAirports = document.getElementById('showAirports');
+        const showBuffers = document.getElementById('showBuffers');
+        const radiusSlider = document.getElementById('radiusSlider');
+        const airportType = document.getElementById('airportType');
+        const searchAirport = document.getElementById('searchAirport');
+        
+        if (showAirports) showAirports.addEventListener('change', toggleAirports);
+        if (showBuffers) showBuffers.addEventListener('change', toggleBuffers);
+        if (radiusSlider) {
+            radiusSlider.addEventListener('input', updateRadius);
+            radiusSlider.value = currentRadius;
+        }
+        if (airportType) airportType.addEventListener('change', filterAirports);
+        if (searchAirport) searchAirport.addEventListener('input', filterAirports);
         
         // Mouse coordinates
         map.on('mousemove', function(e) {
-            document.getElementById('mouseCoordinates').innerHTML = 
-                `<i class="fas fa-map-pin me-1"></i>${e.latlng.lat.toFixed(4)}°, ${e.latlng.lng.toFixed(4)}°`;
+            const coordDisplay = document.getElementById('mouseCoordinates');
+            if (coordDisplay) {
+                coordDisplay.innerHTML = 
+                    `<i class="fas fa-map-pin me-1"></i>${e.latlng.lat.toFixed(4)}°, ${e.latlng.lng.toFixed(4)}°`;
+            }
         });
         
         // Set initial radius display
-        document.getElementById('currentRadius').textContent = currentRadius + 'km';
+        const currentRadiusSpan = document.getElementById('currentRadius');
+        if (currentRadiusSpan) {
+            currentRadiusSpan.textContent = currentRadius + 'km';
+        }
         
         // If airport parameter exists, zoom to it
         {% if active_airport %}
@@ -212,7 +237,8 @@
             // Highlight airport
             if (airportsLayer) {
                 airportsLayer.eachLayer(function(layer) {
-                    if (layer.feature.properties.icao === '{{ active_airport.icao_code }}') {
+                    if (layer.feature && layer.feature.properties && 
+                        layer.feature.properties.icao === '{{ active_airport.icao_code }}') {
                         layer.openPopup();
                     }
                 });
@@ -223,20 +249,32 @@
     
     function loadAirports() {
         fetch('/obstacle-compliance/api/airports.geojson')
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
                 if (airportsLayer) {
                     map.removeLayer(airportsLayer);
                 }
                 
+                if (!data.features || data.features.length === 0) {
+                    console.warn('No airport data received');
+                    showToast('No airport data available', 'warning');
+                    return;
+                }
+                
                 airportsLayer = L.geoJSON(data, {
                     pointToLayer: function(feature, latlng) {
-                        const type = feature.properties.type || 'unknown';
+                        const props = feature.properties || {};
+                        const type = (props.type || '').toLowerCase();
                         let color = '#2196F3'; // default
                         
-                        if (type.toLowerCase().includes('international')) {
+                        if (type.includes('international')) {
                             color = '#0d6efd';
-                        } else if (type.toLowerCase().includes('military')) {
+                        } else if (type.includes('military')) {
                             color = '#6c757d';
                         }
                         
@@ -250,19 +288,23 @@
                         });
                     },
                     onEachFeature: function(feature, layer) {
-                        const props = feature.properties;
+                        const props = feature.properties || {};
+                        const icao = props.icao || 'Unknown';
+                        const name = props.name || 'Unknown Airport';
+                        const type = props.type || 'Unknown';
+                        
                         layer.bindPopup(`
                             <div style="min-width: 200px;">
-                                <h6 class="mb-1">${props.name}</h6>
-                                <p class="mb-1"><strong>${props.icao}</strong></p>
-                                <p class="mb-2">${props.type}</p>
+                                <h6 class="mb-1">${name}</h6>
+                                <p class="mb-1"><strong>${icao}</strong></p>
+                                <p class="mb-2">${type}</p>
                                 <div class="d-grid gap-2">
-                                    <a href="/obstacle-compliance/airports/${props.icao}/" 
+                                    <a href="/obstacle-compliance/airports/${icao}/" 
                                        class="btn btn-sm btn-primary" target="_blank">
                                         <i class="fas fa-eye me-1"></i>View Details
                                     </a>
                                     <button class="btn btn-sm btn-outline-secondary" 
-                                            onclick="checkPropertyNear('${props.icao}', ${feature.geometry.coordinates[1]}, ${feature.geometry.coordinates[0]})">
+                                            onclick="checkPropertyNear('${icao}', ${feature.geometry.coordinates[1]}, ${feature.geometry.coordinates[0]})">
                                         <i class="fas fa-building me-1"></i>Check Property
                                     </button>
                                 </div>
@@ -273,19 +315,35 @@
             })
             .catch(error => {
                 console.error('Error loading airports:', error);
-                showToast('Error loading airport data', 'error');
+                showToast('Error loading airport data: ' + error.message, 'error');
             });
     }
     
     function loadBuffers(radius) {
         // Remove existing buffer layers
-        Object.values(bufferLayers).forEach(layer => map.removeLayer(layer));
+        Object.values(bufferLayers).forEach(layer => {
+            if (layer && map.hasLayer(layer)) {
+                map.removeLayer(layer);
+            }
+        });
+        bufferLayers = {};
         
         const colors = {3: '#FF6B6B', 5: '#FFA500', 10: '#2196F3', 15: '#4CAF50'};
         
         fetch(`/obstacle-compliance/api/buffers.geojson?radius=${radius}`)
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
+                if (!data.features || data.features.length === 0) {
+                    console.warn(`No buffer data for radius ${radius}km`);
+                    showToast(`No buffer zones found for ${radius}km`, 'info');
+                    return;
+                }
+                
                 bufferLayers[radius] = L.geoJSON(data, {
                     style: function(feature) {
                         return {
@@ -297,61 +355,107 @@
                         };
                     },
                     onEachFeature: function(feature, layer) {
-                        const props = feature.properties;
-                        layer.bindTooltip(`${props.airport_name} - ${props.radius_km}km Buffer (${props.area_km2} km²)`, {
+                        const props = feature.properties || {};
+                        const airportName = props.airport_name || 'Unknown';
+                        const areaKm2 = props.area_km2 ? props.area_km2.toFixed(2) : 'Unknown';
+                        
+                        layer.bindTooltip(`${airportName} - ${props.radius_km}km Buffer (${areaKm2} km²)`, {
                             permanent: false,
                             direction: 'center'
                         });
                     }
-                }).addTo(map);
+                });
+                
+                // Check if buffers should be shown
+                const showBuffers = document.getElementById('showBuffers');
+                if (!showBuffers || showBuffers.checked) {
+                    bufferLayers[radius].addTo(map);
+                }
             })
             .catch(error => {
                 console.error('Error loading buffers:', error);
-                showToast('Error loading buffer zones', 'error');
+                showToast('Error loading buffer zones: ' + error.message, 'error');
             });
     }
     
     function toggleAirports(e) {
+        if (!airportsLayer) return;
+        
         if (e.target.checked) {
-            if (airportsLayer) map.addLayer(airportsLayer);
+            if (!map.hasLayer(airportsLayer)) {
+                map.addLayer(airportsLayer);
+            }
         } else {
-            if (airportsLayer) map.removeLayer(airportsLayer);
+            if (map.hasLayer(airportsLayer)) {
+                map.removeLayer(airportsLayer);
+            }
         }
     }
     
     function toggleBuffers(e) {
+        if (!bufferLayers[currentRadius]) return;
+        
         if (e.target.checked) {
-            if (bufferLayers[currentRadius]) map.addLayer(bufferLayers[currentRadius]);
+            if (!map.hasLayer(bufferLayers[currentRadius])) {
+                map.addLayer(bufferLayers[currentRadius]);
+            }
         } else {
-            if (bufferLayers[currentRadius]) map.removeLayer(bufferLayers[currentRadius]);
+            if (map.hasLayer(bufferLayers[currentRadius])) {
+                map.removeLayer(bufferLayers[currentRadius]);
+            }
         }
     }
     
     function updateRadius(e) {
-        currentRadius = e.target.value;
-        document.getElementById('currentRadius').textContent = currentRadius + 'km';
-        
-        if (document.getElementById('showBuffers').checked) {
-            loadBuffers(currentRadius);
+        currentRadius = parseInt(e.target.value);
+        const radiusDisplay = document.getElementById('currentRadius');
+        if (radiusDisplay) {
+            radiusDisplay.textContent = currentRadius + 'km';
         }
+        
+        // Load new buffer if not already loaded
+        if (!bufferLayers[currentRadius]) {
+            loadBuffers(currentRadius);
+        } else {
+            // Toggle visibility based on checkbox
+            const showBuffers = document.getElementById('showBuffers');
+            if (showBuffers && showBuffers.checked) {
+                if (!map.hasLayer(bufferLayers[currentRadius])) {
+                    map.addLayer(bufferLayers[currentRadius]);
+                }
+            }
+        }
+        
+        // Hide other radius buffers
+        Object.keys(bufferLayers).forEach(radius => {
+            const r = parseInt(radius);
+            if (r !== currentRadius && map.hasLayer(bufferLayers[radius])) {
+                map.removeLayer(bufferLayers[radius]);
+            }
+        });
     }
     
     function filterAirports() {
-        const type = document.getElementById('airportType').value.toLowerCase();
-        const search = document.getElementById('searchAirport').value.toLowerCase();
-        
         if (!airportsLayer) return;
         
+        const typeFilter = document.getElementById('airportType');
+        const searchFilter = document.getElementById('searchAirport');
+        
+        const type = typeFilter ? typeFilter.value.toLowerCase() : '';
+        const search = searchFilter ? searchFilter.value.toLowerCase() : '';
+        
         airportsLayer.eachLayer(function(layer) {
+            if (!layer.feature || !layer.feature.properties) return;
+            
             const props = layer.feature.properties;
             let show = true;
             
-            if (type && !props.type.toLowerCase().includes(type)) {
+            if (type && props.type && !props.type.toLowerCase().includes(type)) {
                 show = false;
             }
             
-            if (search && !props.name.toLowerCase().includes(search) && 
-                !props.icao.toLowerCase().includes(search)) {
+            if (search && props.name && !props.name.toLowerCase().includes(search) && 
+                props.icao && !props.icao.toLowerCase().includes(search)) {
                 show = false;
             }
             
