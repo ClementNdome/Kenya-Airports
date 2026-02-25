@@ -1,0 +1,493 @@
+{% extends 'obstacle_compliance/base.html' %}
+
+{% block title %}Check Property - KCAA Obstacle Compliance{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <h2 class="mb-1">
+                        <i class="fas fa-building me-2 text-primary"></i>
+                        Property Compliance Checker
+                    </h2>
+                    <p class="text-muted mb-0">
+                        Check if your property complies with KCAA obstacle limitation surfaces
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Input Form -->
+        <div class="col-lg-4 mb-4">
+            <div class="card">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0">
+                        <i class="fas fa-pencil-alt me-2 text-primary"></i>
+                        Property Details
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <form id="propertyForm">
+                        {% csrf_token %}
+                        
+                        <!-- Search by Address -->
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">Search by Address</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="addressSearch" 
+                                       placeholder="Enter address or landmark...">
+                                <button class="btn btn-outline-primary" type="button" id="geocodeBtn">
+                                    <i class="fas fa-search"></i>
+                                </button>
+                            </div>
+                            <small class="text-muted">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Or click on the map to select location
+                            </small>
+                        </div>
+                        
+                        <hr>
+                        
+                        <!-- Manual Coordinates -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Coordinates</label>
+                            <div class="row">
+                                <div class="col-md-6 mb-2">
+                                    <input type="number" step="any" class="form-control" id="latitude" 
+                                           placeholder="Latitude" value="-1.2864">
+                                </div>
+                                <div class="col-md-6 mb-2">
+                                    <input type="number" step="any" class="form-control" id="longitude" 
+                                           placeholder="Longitude" value="36.8172">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Building Height -->
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">
+                                Building Height (meters above ground)
+                            </label>
+                            <input type="number" class="form-control" id="height" 
+                                   value="{{ default_height }}" min="0" step="0.1">
+                            <small class="text-muted">
+                                <i class="fas fa-ruler me-1"></i>
+                                Enter total height including any structures
+                            </small>
+                        </div>
+                        
+                        <!-- Action Buttons -->
+                        <div class="d-grid gap-2">
+                            <button type="button" class="btn btn-primary btn-lg" id="checkCompliance">
+                                <i class="fas fa-check-circle me-2"></i>
+                                Check Compliance
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="useMyLocation">
+                                <i class="fas fa-location-dot me-2"></i>
+                                Use My Location
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <!-- Quick Tips -->
+                    <div class="alert alert-info mt-4 mb-0">
+                        <i class="fas fa-lightbulb me-2"></i>
+                        <strong>Quick Tips:</strong>
+                        <ul class="mb-0 mt-2 small">
+                            <li>Structures >30m require obstruction lighting within 15km zone</li>
+                            <li>Maximum height varies based on distance from airport</li>
+                            <li>Download compliance report for official records</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Map and Results -->
+        <div class="col-lg-8 mb-4">
+            <!-- Map -->
+            <div class="card mb-4">
+                <div class="card-header bg-white py-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            <i class="fas fa-map-marked-alt me-2 text-primary"></i>
+                            Location Map
+                        </h5>
+                        <div>
+                            <span class="badge bg-info" id="mapCoordinates"></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div id="propertyMap" class="map-container" style="height: 400px;"></div>
+                </div>
+            </div>
+            
+            <!-- Results Card (Initially Hidden) -->
+            <div class="card" id="resultsCard" style="display: none;">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0">
+                        <i class="fas fa-clipboard-check me-2 text-success"></i>
+                        Compliance Results
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <!-- Loading State -->
+                    <div id="resultsLoading" class="text-center py-5" style="display: none;">
+                        <div class="loading-spinner mb-3"></div>
+                        <p class="text-muted">Analyzing property against airport zones...</p>
+                    </div>
+                    
+                    <!-- Results Content -->
+                    <div id="resultsContent"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Results Template (Hidden) -->
+<template id="complianceTemplate">
+    <div class="compliance-results">
+        <!-- Status Banner -->
+        <div class="alert mb-4" id="statusBanner">
+            <div class="d-flex align-items-center">
+                <div class="compliance-score me-3" id="scoreCircle">85</div>
+                <div>
+                    <h5 class="mb-1" id="statusTitle">Compliant</h5>
+                    <p class="mb-0" id="statusMessage">Property meets all requirements</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Key Metrics -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card bg-light">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted mb-2">Distance to Nearest</h6>
+                        <h3 id="nearestDistance">0.0</h3>
+                        <small class="text-muted" id="nearestAirport">Airport</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card bg-light">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted mb-2">Max Allowed Height</h6>
+                        <h3 id="maxAllowed">45</h3>
+                        <small class="text-muted">meters AGL</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card bg-light">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted mb-2">Headroom</h6>
+                        <h3 id="headroom">15</h3>
+                        <small class="text-muted">meters remaining</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Detailed Analysis -->
+        <div class="row">
+            <div class="col-md-6">
+                <h6 class="fw-bold mb-3">
+                    <i class="fas fa-info-circle me-2 text-primary"></i>
+                    Property Details
+                </h6>
+                <table class="table table-sm">
+                    <tr>
+                        <td>Coordinates:</td>
+                        <td class="fw-bold" id="displayCoordinates"></td>
+                    </tr>
+                    <tr>
+                        <td>Ground Elevation:</td>
+                        <td class="fw-bold" id="groundElevation">0m AMSL</td>
+                    </tr>
+                    <tr>
+                        <td>Building Top:</td>
+                        <td class="fw-bold" id="buildingTop">0m AMSL</td>
+                    </tr>
+                    <tr>
+                        <td>Airports Affected:</td>
+                        <td class="fw-bold" id="airportsCount">0</td>
+                    </tr>
+                </table>
+            </div>
+            <div class="col-md-6">
+                <h6 class="fw-bold mb-3">
+                    <i class="fas fa-exclamation-triangle me-2 text-warning"></i>
+                    Requirements
+                </h6>
+                <div id="requirements"></div>
+            </div>
+        </div>
+        
+        <!-- Affected Airports -->
+        <h6 class="fw-bold mt-4 mb-3">
+            <i class="fas fa-plane me-2 text-primary"></i>
+            Affected Airports
+        </h6>
+        <div class="table-responsive">
+            <table class="table table-sm" id="airportsTable">
+                <thead>
+                    <tr>
+                        <th>Airport</th>
+                        <th>Distance</th>
+                        <th>Status</th>
+                        <th>Requirements</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        
+        <!-- Action Buttons -->
+        <div class="mt-4">
+            <button class="btn btn-primary" id="downloadReport">
+                <i class="fas fa-file-pdf me-2"></i>Download Full Report
+            </button>
+            <button class="btn btn-outline-secondary" id="printResults">
+                <i class="fas fa-print me-2"></i>Print
+            </button>
+            <button class="btn btn-outline-secondary" id="shareResults">
+                <i class="fas fa-share-alt me-2"></i>Share
+            </button>
+        </div>
+    </div>
+</template>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let map, marker;
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize map
+        map = L.map('propertyMap').setView([-1.2864, 36.8172], 13);
+        
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        }).addTo(map);
+        
+        // Add click handler to map
+        map.on('click', function(e) {
+            updateCoordinates(e.latlng.lat, e.latlng.lng);
+        });
+        
+        // Initialize marker
+        marker = L.marker([-1.2864, 36.8172], { draggable: true }).addTo(map);
+        marker.on('dragend', function(e) {
+            const pos = e.target.getLatLng();
+            updateCoordinates(pos.lat, pos.lng);
+        });
+        
+        // Event listeners
+        document.getElementById('checkCompliance').addEventListener('click', checkCompliance);
+        document.getElementById('useMyLocation').addEventListener('click', useMyLocation);
+        document.getElementById('geocodeBtn').addEventListener('click', geocodeAddress);
+        
+        // Update coordinates display
+        updateCoordinates(-1.2864, 36.8172);
+    });
+    
+    function updateCoordinates(lat, lng) {
+        document.getElementById('latitude').value = lat.toFixed(6);
+        document.getElementById('longitude').value = lng.toFixed(6);
+        document.getElementById('mapCoordinates').innerHTML = 
+            `<i class="fas fa-map-pin me-1"></i>${lat.toFixed(4)}°, ${lng.toFixed(4)}°`;
+        
+        marker.setLatLng([lat, lng]);
+        map.setView([lat, lng]);
+    }
+    
+    function useMyLocation() {
+        if (navigator.geolocation) {
+            showLoading(document.getElementById('useMyLocation'));
+            
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    updateCoordinates(position.coords.latitude, position.coords.longitude);
+                    hideLoading(document.getElementById('useMyLocation'), 'Use My Location');
+                    showToast('Location detected successfully', 'success');
+                },
+                function(error) {
+                    hideLoading(document.getElementById('useMyLocation'), 'Use My Location');
+                    showToast('Error getting location: ' + error.message, 'error');
+                }
+            );
+        } else {
+            showToast('Geolocation not supported by your browser', 'warning');
+        }
+    }
+    
+    function geocodeAddress() {
+        const address = document.getElementById('addressSearch').value;
+        if (!address) {
+            showToast('Please enter an address', 'warning');
+            return;
+        }
+        
+        showLoading(document.getElementById('geocodeBtn'));
+        
+        fetch(`/obstacle-compliance/api/geocode/?address=${encodeURIComponent(address)}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.lat && data.lon) {
+                    updateCoordinates(data.lat, data.lon);
+                    showToast('Location found', 'success');
+                } else {
+                    showToast('Address not found', 'warning');
+                }
+            })
+            .catch(error => {
+                console.error('Geocoding error:', error);
+                showToast('Error geocoding address', 'error');
+            })
+            .finally(() => {
+                hideLoading(document.getElementById('geocodeBtn'), '<i class="fas fa-search"></i>');
+            });
+    }
+    
+    function checkCompliance() {
+        const lat = document.getElementById('latitude').value;
+        const lon = document.getElementById('longitude').value;
+        const height = document.getElementById('height').value;
+        
+        if (!lat || !lon) {
+            showToast('Please select a location', 'warning');
+            return;
+        }
+        
+        // Show results card and loading
+        document.getElementById('resultsCard').style.display = 'block';
+        document.getElementById('resultsLoading').style.display = 'block';
+        document.getElementById('resultsContent').style.display = 'none';
+        
+        // Scroll to results
+        document.getElementById('resultsCard').scrollIntoView({ behavior: 'smooth' });
+        
+        // Make API call
+        fetch(`/obstacle-compliance/api/check-compliance/?lat=${lat}&lon=${lon}&height=${height}`)
+            .then(response => response.json())
+            .then(data => {
+                displayResults(data);
+            })
+            .catch(error => {
+                console.error('Compliance check error:', error);
+                showToast('Error checking compliance', 'error');
+                document.getElementById('resultsLoading').style.display = 'none';
+                document.getElementById('resultsCard').style.display = 'none';
+            });
+    }
+    
+    function displayResults(data) {
+        document.getElementById('resultsLoading').style.display = 'none';
+        document.getElementById('resultsContent').style.display = 'block';
+        
+        const template = document.getElementById('complianceTemplate').content.cloneNode(true);
+        
+        // Set status
+        const statusClass = getStatusClass(data.status);
+        const statusBanner = template.querySelector('#statusBanner');
+        statusBanner.classList.add(`alert-${statusClass}`);
+        
+        template.querySelector('#statusTitle').textContent = 
+            data.status === 'GREEN' ? 'Compliant' :
+            data.status === 'YELLOW' ? 'Caution - Within Regulatory Zone' :
+            data.status === 'RED' ? 'Hazard Detected' : 'Unknown';
+        
+        template.querySelector('#statusMessage').textContent = data.message;
+        template.querySelector('#scoreCircle').textContent = data.compliance_score || 'N/A';
+        
+        // Primary result
+        const pr = data.primary_result || {};
+        template.querySelector('#nearestDistance').textContent = pr.distance_km + ' km';
+        template.querySelector('#nearestAirport').textContent = data.primary_airport?.name || 'Unknown';
+        template.querySelector('#maxAllowed').textContent = pr.max_allowed_agl || 'No limit';
+        template.querySelector('#headroom').textContent = pr.headroom || 'N/A';
+        
+        // Property details
+        template.querySelector('#displayCoordinates').textContent = 
+            `${document.getElementById('latitude').value}, ${document.getElementById('longitude').value}`;
+        template.querySelector('#groundElevation').textContent = pr.ground_elevation + 'm AMSL';
+        template.querySelector('#buildingTop').textContent = pr.building_top_amsl + 'm AMSL';
+        template.querySelector('#airportsCount').textContent = data.airports_affected_count || 0;
+        
+        // Requirements
+        const requirements = template.querySelector('#requirements');
+        requirements.innerHTML = '';
+        
+        if (data.requires_lighting) {
+            requirements.innerHTML += '<div class="alert alert-warning py-2"><i class="fas fa-lightbulb me-2"></i>Obstruction lighting required</div>';
+        }
+        if (data.is_hazard) {
+            requirements.innerHTML += '<div class="alert alert-danger py-2"><i class="fas fa-exclamation-triangle me-2"></i>Hazard - height exceeds limits</div>';
+        }
+        if (!data.requires_lighting && !data.is_hazard) {
+            requirements.innerHTML += '<div class="alert alert-success py-2"><i class="fas fa-check-circle me-2"></i>No special requirements</div>';
+        }
+        
+        // Airports table
+        const tableBody = template.querySelector('#airportsTable tbody');
+        tableBody.innerHTML = '';
+        
+        if (data.airports_affected) {
+            data.airports_affected.forEach(apt => {
+                const row = tableBody.insertRow();
+                row.innerHTML = `
+                    <td>${apt.name} (${apt.icao})</td>
+                    <td>${apt.distance_km} km</td>
+                    <td><span class="status-badge ${getStatusClass(apt.status)}">${apt.status}</span></td>
+                    <td>${apt.requires_lighting ? 'Lighting' : 'None'}</td>
+                `;
+            });
+        }
+        
+        // Clear and append new content
+        document.getElementById('resultsContent').innerHTML = '';
+        document.getElementById('resultsContent').appendChild(template);
+        
+        // Add event listeners for buttons
+        document.getElementById('downloadReport').addEventListener('click', downloadReport);
+    }
+    
+    function downloadReport() {
+        const lat = document.getElementById('latitude').value;
+        const lon = document.getElementById('longitude').value;
+        const height = document.getElementById('height').value;
+        
+        showToast('Generating report...', 'info');
+        
+        fetch('/obstacle-compliance/api/generate-report/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify({ lat, lon, height })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'SUCCESS') {
+                showToast('Report generated successfully', 'success');
+                // In production, redirect to PDF download
+            } else {
+                showToast('Error generating report', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Report generation error:', error);
+            showToast('Error generating report', 'error');
+        });
+    }
+</script>
+{% endblock %}
