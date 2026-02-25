@@ -32,4 +32,7 @@ urlpatterns = [
     
     # Statistics
     path('api/stats/', views.StatisticsView.as_view(), name='api_stats'),
+
+        # In obstacle_compliance/urls.py - add temporarily
+    path('debug/', views.debug_geojson, name='debug'),
 ]
