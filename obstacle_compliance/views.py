@@ -335,6 +335,8 @@ class BatchComplianceView(View):
 # MAP AND VISUALIZATION VIEWS
 # ============================================
 
+# obstacle_compliance/views.py - Update MapView class
+
 class MapView(TemplateView):
     """
     Interactive map view with buffer visualization
@@ -346,21 +348,32 @@ class MapView(TemplateView):
         
         # Get active airport if specified
         icao = self.request.GET.get('airport')
+        active_airport = None
+        
         if icao:
             try:
-                airport = Aerodrome.objects.get(icao_code=icao)
-                context['active_airport'] = airport
-                context['map_center'] = [airport.geom.y, airport.geom.x]
+                active_airport = Aerodrome.objects.get(icao_code=icao.upper())
+                context['active_airport'] = active_airport
+                context['map_center'] = [active_airport.geom.y, active_airport.geom.x]
                 context['map_zoom'] = 12
             except Aerodrome.DoesNotExist:
-                pass
+                # Log the error but don't break the page
+                logger.warning(f"Airport with ICAO code {icao} not found")
+                context['map_center'] = [-1.2864, 36.8172]  # Nairobi center
+                context['map_zoom'] = 8
+        else:
+            context['map_center'] = [-1.2864, 36.8172]  # Nairobi center
+            context['map_zoom'] = 8
         
-        # Default radius
-        context['default_radius'] = self.request.GET.get('radius', 15)
+        # Default radius - ensure it's an integer
+        try:
+            context['default_radius'] = int(self.request.GET.get('radius', 15))
+        except ValueError:
+            context['default_radius'] = 15
         
-        # Layer visibility
-        context['show_buffers'] = self.request.GET.get('buffers', 'true') == 'true'
-        context['show_airports'] = self.request.GET.get('airports', 'true') == 'true'
+        # Layer visibility - ensure boolean values
+        context['show_buffers'] = self.request.GET.get('buffers', 'true').lower() == 'true'
+        context['show_airports'] = self.request.GET.get('airports', 'true').lower() == 'true'
         
         return context
 
@@ -445,32 +458,41 @@ class BufferGeoJSONView(View):
         return colors.get(radius, '#666666')
 
 
+# obstacle_compliance/views.py - Update AirportGeoJSONView
+
 class AirportGeoJSONView(View):
     """
     Return airport points as GeoJSON for mapping
     """
-    @method_decorator(cache_page(60 * 60))  # Cache for 1 hour
     def get(self, request):
         try:
             airports = Aerodrome.objects.all()
             
             features = []
             for airport in airports:
-                geom_json = json.loads(airport.geom.geojson)
-                
-                feature = {
-                    'type': 'Feature',
-                    'geometry': geom_json,
-                    'properties': {
-                        'id': airport.fid,
-                        'icao': airport.icao_code,
-                        'name': airport.name or airport.admin_company or airport.icao_code,
-                        'type': airport.type,
-                        'elevation': airport.elevation_m,
-                        'runway_info': f"Elevation: {airport.elevation_m}m",
+                try:
+                    if not airport.geom:
+                        continue
+                        
+                    geom_json = json.loads(airport.geom.geojson)
+                    
+                    feature = {
+                        'type': 'Feature',
+                        'geometry': geom_json,
+                        'properties': {
+                            'id': airport.fid,
+                            'icao': airport.icao_code,
+                            'name': airport.name or airport.admin_company or airport.icao_code,
+                            'type': airport.type or 'Unknown',
+                            'elevation': airport.elevation_m,
+                            'runway_info': f"Elevation: {airport.elevation_m}m",
+                        }
                     }
-                }
-                features.append(feature)
+                    features.append(feature)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing airport {airport.icao_code}: {e}")
+                    continue
             
             geojson = {
                 'type': 'FeatureCollection',
@@ -484,9 +506,7 @@ class AirportGeoJSONView(View):
             return JsonResponse({
                 'type': 'FeatureCollection',
                 'features': []
-            }, status=500)
-
-
+            })
 # ============================================
 # SEARCH AND AUTOCOMPLETE VIEWS
 # ============================================
@@ -646,3 +666,33 @@ def handler404(request, exception):
 def handler500(request):
     """Custom 500 handler"""
     return render(request, 'obstacle_compliance/500.html', status=500)
+
+
+# Add this temporarily for debugging
+from django.http import HttpResponse
+
+def debug_geojson(request):
+    """Debug endpoint to check GeoJSON data"""
+    try:
+        airports_count = Aerodrome.objects.count()
+        buffers_count = AerodromeBuffer.objects.count()
+        
+        sample_airport = Aerodrome.objects.first()
+        sample_buffer = AerodromeBuffer.objects.first()
+        
+        return HttpResponse(f"""
+            <h1>GeoJSON Debug Info</h1>
+            <ul>
+                <li>Airports: {airports_count}</li>
+                <li>Buffers: {buffers_count}</li>
+                <li>Sample Airport: {sample_airport.icao_code if sample_airport else 'None'}</li>
+                <li>Sample Buffer: {sample_buffer.id if sample_buffer else 'None'}</li>
+            </ul>
+            <h2>Test Links:</h2>
+            <ul>
+                <li><a href="/obstacle-compliance/api/airports.geojson">Airports GeoJSON</a></li>
+                <li><a href="/obstacle-compliance/api/buffers.geojson?radius=15">Buffers GeoJSON (15km)</a></li>
+            </ul>
+        """)
+    except Exception as e:
+        return HttpResponse(f"Error: {str(e)}")
