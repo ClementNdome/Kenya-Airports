@@ -1,0 +1,436 @@
+{% extends 'obstacle_compliance/base.html' %}
+
+{% block title %}{{ airport.icao_code }} - {{ airport.name }} - KCAA Obstacle Compliance{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Header with Navigation -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <nav aria-label="breadcrumb">
+                                <ol class="breadcrumb mb-2">
+                                    <li class="breadcrumb-item">
+                                        <a href="{% url 'obstacle_compliance:dashboard' %}">Dashboard</a>
+                                    </li>
+                                    <li class="breadcrumb-item">
+                                        <a href="{% url 'obstacle_compliance:airport_list' %}">Airports</a>
+                                    </li>
+                                    <li class="breadcrumb-item active">{{ airport.icao_code }}</li>
+                                </ol>
+                            </nav>
+                            <h2 class="mb-1">
+                                <span class="badge bg-dark me-2">{{ airport.icao_code }}</span>
+                                {{ airport.name|default:airport.admin_company }}
+                            </h2>
+                            <p class="text-muted mb-0">
+                                <i class="fas fa-map-pin me-2"></i>
+                                {{ airport.latitude }}, {{ airport.longitude }}
+                                {% if airport.type %}
+                                <span class="badge bg-info ms-2">{{ airport.type }}</span>
+                                {% endif %}
+                            </p>
+                        </div>
+                        <div>
+                            <a href="{% url 'obstacle_compliance:map_view' %}?airport={{ airport.icao_code }}" 
+                               class="btn btn-outline-primary">
+                                <i class="fas fa-map-marked-alt me-2"></i>View on Map
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="row mb-4">
+        <div class="col-md-3 mb-3">
+            <div class="stat-card">
+                <div class="icon"><i class="fas fa-mountain"></i></div>
+                <div class="value">{{ airport.elevation_m|floatformat:0 }}m</div>
+                <div class="label">Elevation AMSL</div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="stat-card">
+                <div class="icon"><i class="fas fa-draw-polygon"></i></div>
+                <div class="value">{{ selected_buffer.area_km2|floatformat:0 }} km²</div>
+                <div class="label">15km Buffer Area</div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="stat-card">
+                <div class="icon"><i class="fas fa-building"></i></div>
+                <div class="value">{{ counties_affected|length }}</div>
+                <div class="label">Counties Affected</div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="stat-card">
+                <div class="icon"><i class="fas fa-plane-departure"></i></div>
+                <div class="value">{{ runways|length }}</div>
+                <div class="label">Runways</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Main Content -->
+        <div class="col-lg-8 mb-4">
+            <!-- Map -->
+            <div class="card mb-4">
+                <div class="card-header bg-white py-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            <i class="fas fa-map-marked-alt me-2 text-primary"></i>
+                            Obstacle Limitation Surfaces
+                        </h5>
+                        <div class="btn-group btn-group-sm">
+                            <button type="button" class="btn btn-outline-primary buffer-btn" data-radius="3">3km</button>
+                            <button type="button" class="btn btn-outline-primary buffer-btn" data-radius="5">5km</button>
+                            <button type="button" class="btn btn-outline-primary buffer-btn" data-radius="10">10km</button>
+                            <button type="button" class="btn btn-primary buffer-btn active" data-radius="15">15km</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div id="airportDetailMap" class="map-container" style="height: 450px;"></div>
+                </div>
+            </div>
+
+            <!-- Buffer Information -->
+            <div class="card mb-4">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0">
+                        <i class="fas fa-layer-group me-2 text-primary"></i>
+                        Buffer Zone Details
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6 class="fw-bold">Inner Horizontal Surface (0-4km)</h6>
+                            <ul class="list-unstyled">
+                                <li><i class="fas fa-circle text-danger me-2 small"></i>Height: +45m above airport</li>
+                                <li><i class="fas fa-circle text-danger me-2 small"></i>Critical approach paths</li>
+                                <li><i class="fas fa-circle text-danger me-2 small"></i>Strict development controls</li>
+                            </ul>
+                            
+                            <h6 class="fw-bold mt-3">Conical Surface (4-6km)</h6>
+                            <ul class="list-unstyled">
+                                <li><i class="fas fa-circle text-warning me-2 small"></i>Rises at 5% (1:20) slope</li>
+                                <li><i class="fas fa-circle text-warning me-2 small"></i>Graduated height restrictions</li>
+                                <li><i class="fas fa-circle text-warning me-2 small"></i>Requires notification</li>
+                            </ul>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="fw-bold">Regulatory Zone (6-15km)</h6>
+                            <ul class="list-unstyled">
+                                <li><i class="fas fa-circle text-success me-2 small"></i>Lighting required >30m AGL</li>
+                                <li><i class="fas fa-circle text-success me-2 small"></i>High-rises need assessment</li>
+                                <li><i class="fas fa-circle text-success me-2 small"></i>KCAA permit required</li>
+                            </ul>
+                            
+                            <h6 class="fw-bold mt-3">Lighting Requirements</h6>
+                            <ul class="list-unstyled">
+                                <li><i class="fas fa-lightbulb me-2 text-warning"></i>30-90m: Class B medium-intensity</li>
+                                <li><i class="fas fa-lightbulb me-2 text-danger"></i>>90m: Class A high-intensity</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Overlapping Airports -->
+            {% if overlapping_airports %}
+            <div class="card">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0">
+                        <i class="fas fa-exchange-alt me-2 text-primary"></i>
+                        Overlapping Buffer Zones
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted mb-3">
+                        {{ overlapping_count }} airport(s) have overlapping 15km buffers with {{ airport.icao_code }}
+                    </p>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Airport</th>
+                                    <th>ICAO</th>
+                                    <th>Distance</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for buffer in overlapping_airports %}
+                                <tr>
+                                    <td>{{ buffer.aerodrome.name|default:buffer.aerodrome.admin_company }}</td>
+                                    <td><strong>{{ buffer.aerodrome.icao_code }}</strong></td>
+                                    <td>~{{ buffer.aerodrome.icao_code|default:"15" }}km</td>
+                                    <td>
+                                        <a href="{% url 'obstacle_compliance:airport_detail' buffer.aerodrome.icao_code %}" 
+                                           class="btn btn-sm btn-outline-primary">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="col-lg-4 mb-4">
+            <!-- Contact Information -->
+            <div class="card mb-4">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0">
+                        <i class="fas fa-address-card me-2 text-primary"></i>
+                        Airport Authority
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="fw-bold mb-2">{{ airport.admin_company|default:"Kenya Airports Authority" }}</p>
+                    
+                    {% if airport.admin_address %}
+                    <p class="mb-2">
+                        <i class="fas fa-map-marker-alt me-2 text-muted"></i>
+                        {{ airport.admin_address }}
+                    </p>
+                    {% endif %}
+                    
+                    {% if airport.admin_telephone %}
+                    <p class="mb-2">
+                        <i class="fas fa-phone me-2 text-muted"></i>
+                        {{ airport.admin_telephone }}
+                    </p>
+                    {% endif %}
+                    
+                    {% if airport.admin_email %}
+                    <p class="mb-2">
+                        <i class="fas fa-envelope me-2 text-muted"></i>
+                        <a href="mailto:{{ airport.admin_email }}">{{ airport.admin_email }}</a>
+                    </p>
+                    {% endif %}
+                    
+                    {% if airport.admin_website %}
+                    <p class="mb-0">
+                        <i class="fas fa-globe me-2 text-muted"></i>
+                        <a href="{{ airport.admin_website }}" target="_blank">{{ airport.admin_website }}</a>
+                    </p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Runway Information -->
+            <div class="card mb-4">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0">
+                        <i class="fas fa-road me-2 text-primary"></i>
+                        Runway Information
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <ul class="list-group list-group-flush">
+                        {% for runway in runways %}
+                        <li class="list-group-item px-0">
+                            <i class="fas fa-arrow-right me-2 text-primary"></i>
+                            {{ runway }}
+                        </li>
+                        {% empty %}
+                        <li class="list-group-item px-0 text-muted">
+                            Runway information not available
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Development Statistics -->
+            <div class="card mb-4">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0">
+                        <i class="fas fa-chart-pie me-2 text-primary"></i>
+                        Development Impact
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="impactChart" height="200"></canvas>
+                    
+                    <hr>
+                    
+                    <div class="mt-3">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>High-rises (>25m)</span>
+                            <span class="fw-bold">~250</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>New Developments</span>
+                            <span class="fw-bold">~45</span>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <span>Pending Permits</span>
+                            <span class="fw-bold">~12</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="card">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0">
+                        <i class="fas fa-bolt me-2 text-warning"></i>
+                        Quick Actions
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        <a href="{% url 'obstacle_compliance:property_check' %}?lat={{ airport.geom.y }}&lon={{ airport.geom.x }}" 
+                           class="btn btn-outline-primary">
+                            <i class="fas fa-building me-2"></i>
+                            Check Property Near Airport
+                        </a>
+                        <button class="btn btn-outline-secondary" onclick="downloadBufferData()">
+                            <i class="fas fa-download me-2"></i>
+                            Download Buffer Data
+                        </button>
+                        <button class="btn btn-outline-secondary" onclick="generateReport()">
+                            <i class="fas fa-file-pdf me-2"></i>
+                            Generate Impact Report
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% block extra_js %}
+<script>
+    let map;
+    let bufferLayers = {};
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize map
+        const airportLat = {{ airport.geom.y }};
+        const airportLng = {{ airport.geom.x }};
+        
+        map = L.map('airportDetailMap').setView([airportLat, airportLng], 11);
+        
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        }).addTo(map);
+        
+        // Add airport marker
+        L.marker([airportLat, airportLng])
+            .addTo(map)
+            .bindPopup(`
+                <strong>{{ airport.icao_code }}</strong><br>
+                {{ airport.name|default:airport.admin_company }}<br>
+                Elevation: {{ airport.elevation_m|floatformat:0 }}m
+            `)
+            .openPopup();
+        
+        // Load buffers
+        loadBuffer(15);
+        
+        // Buffer button handlers
+        document.querySelectorAll('.buffer-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const radius = this.dataset.radius;
+                
+                // Update active state
+                document.querySelectorAll('.buffer-btn').forEach(b => {
+                    b.classList.remove('btn-primary', 'active');
+                    b.classList.add('btn-outline-primary');
+                });
+                this.classList.remove('btn-outline-primary');
+                this.classList.add('btn-primary', 'active');
+                
+                loadBuffer(radius);
+            });
+        });
+        
+        // Initialize impact chart
+        initImpactChart();
+    });
+    
+    function loadBuffer(radius) {
+        // Remove existing buffer layers
+        Object.values(bufferLayers).forEach(layer => map.removeLayer(layer));
+        
+        fetch(`/obstacle-compliance/api/buffers.geojson?radius=${radius}&icao={{ airport.icao_code }}`)
+            .then(response => response.json())
+            .then(data => {
+                bufferLayers[radius] = L.geoJSON(data, {
+                    style: function(feature) {
+                        const colors = {3: '#FF6B6B', 5: '#FFA500', 10: '#2196F3', 15: '#4CAF50'};
+                        return {
+                            color: colors[radius] || '#666666',
+                            weight: 3,
+                            opacity: 0.8,
+                            fillColor: colors[radius] || '#666666',
+                            fillOpacity: 0.15
+                        };
+                    }
+                }).addTo(map);
+                
+                // Fit map to buffer bounds
+                if (data.features.length > 0) {
+                    const bounds = bufferLayers[radius].getBounds();
+                    map.fitBounds(bounds, { padding: [20, 20] });
+                }
+            })
+            .catch(error => {
+                console.error('Error loading buffer:', error);
+                showToast('Error loading buffer zone', 'error');
+            });
+    }
+    
+    function initImpactChart() {
+        const ctx = document.getElementById('impactChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Residential', 'Commercial', 'Industrial', 'Other'],
+                datasets: [{
+                    data: [45, 30, 15, 10],
+                    backgroundColor: ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+    }
+    
+    function downloadBufferData() {
+        const radius = document.querySelector('.buffer-btn.active').dataset.radius;
+        window.location.href = `/obstacle-compliance/api/buffers.geojson?radius=${radius}&icao={{ airport.icao_code }}&download=true`;
+    }
+    
+    function generateReport() {
+        showToast('Generating impact report...', 'info');
+        // Implement report generation
+    }
+</script>
+{% endblock %}
