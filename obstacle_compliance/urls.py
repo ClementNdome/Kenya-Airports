@@ -33,6 +33,8 @@ urlpatterns = [
     # Statistics
     path('api/stats/', views.StatisticsView.as_view(), name='api_stats'),
 
+    path('api/airport-points.geojson', views.AerodromePointsGeoJSONView.as_view(), name='airport_points_geojson'),
+
         # In obstacle_compliance/urls.py - add temporarily
     path('debug/', views.debug_geojson, name='debug'),
 ]
