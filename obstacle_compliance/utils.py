@@ -7,7 +7,10 @@ from functools import lru_cache
 from geopy.distance import geodesic
 from .models import Aerodrome, AerodromeBuffer
 import logging
-
+# from dotenv import load_dotenv
+import os
+from decouple import config
+# load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Constants from KCAA/ICAO
@@ -22,20 +25,27 @@ HIGH_RISE_THRESHOLD = 90  # Additional lighting threshold for very tall structur
 class DEMService:
     """Handles Digital Elevation Model queries with caching"""
     
-    def __init__(self, dem_path='obstacle_compliance/newdata/kenya_srtm_30.tif'):
-        self.dem_path = dem_path
+    def __init__(self, dem_path=None):
+        # Use Environment Variable in production, fallback to local for dev
+        # self.dem_path = dem_path or config('DEM_URL', default='obstacle_compliance/newdata/kenya_srtm_30.tif')
+        self.dem_path = dem_path or config('DEM_URL')
+
         self._dataset = None
         self._nodata_value = None
     
     def _get_dataset(self):
-        """Lazy load the DEM dataset"""
+        """Lazy load the DEM dataset with support for remote COGs"""
         if self._dataset is None:
             try:
-                self._dataset = rasterio.open(self.dem_path)
+                # If the path is a URL, prefix it for rasterio/GDAL
+                path = self.dem_path
+                if path.startswith('http'):
+                    path = f"/vsicurl/{path}"
+                
+                # Rasterio uses GDAL's virtual file system to stream only needed bytes
+                self._dataset = rasterio.open(path)
                 self._nodata_value = self._dataset.nodata
-                logger.info(f"DEM loaded: {self.dem_path}")
-                logger.info(f"DEM bounds: {self._dataset.bounds}")
-                logger.info(f"DEM nodata value: {self._nodata_value}")
+                logger.info(f"DEM loaded from: {path}")
             except Exception as e:
                 logger.error(f"Failed to load DEM: {e}")
                 raise
