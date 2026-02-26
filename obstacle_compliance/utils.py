@@ -27,8 +27,8 @@ class DEMService:
     
     def __init__(self, dem_path=None):
         # Use Environment Variable in production, fallback to local for dev
-        # self.dem_path = dem_path or config('DEM_URL', default='obstacle_compliance/newdata/kenya_srtm_30.tif')
-        self.dem_path = dem_path or config('DEM_URL')
+        self.dem_path = dem_path or config('', default='obstacle_compliance/newdata/kenya_srtm_30.tif')
+        # self.dem_path = dem_path or config('DEM_URL')
 
         self._dataset = None
         self._nodata_value = None
