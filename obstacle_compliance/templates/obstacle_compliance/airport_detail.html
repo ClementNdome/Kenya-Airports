@@ -233,29 +233,7 @@
                 </div>
             </div>
 
-            <!-- Runway Information -->
-            <div class="card mb-4">
-                <div class="card-header bg-white py-3">
-                    <h5 class="mb-0">
-                        <i class="fas fa-road me-2 text-primary"></i>
-                        Runway Information
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <ul class="list-group list-group-flush">
-                        {% for runway in runways %}
-                        <li class="list-group-item px-0">
-                            <i class="fas fa-arrow-right me-2 text-primary"></i>
-                            {{ runway }}
-                        </li>
-                        {% empty %}
-                        <li class="list-group-item px-0 text-muted">
-                            Runway information not available
-                        </li>
-                        {% endfor %}
-                    </ul>
-                </div>
-            </div>
+            
 
             <!-- Development Statistics -->
             <div class="card mb-4">
@@ -302,10 +280,7 @@
                             <i class="fas fa-building me-2"></i>
                             Check Property Near Airport
                         </a>
-                        <button class="btn btn-outline-secondary" onclick="downloadBufferData()">
-                            <i class="fas fa-download me-2"></i>
-                            Download Buffer Data
-                        </button>
+                        
                         <button class="btn btn-outline-secondary" onclick="generateReport()">
                             <i class="fas fa-file-pdf me-2"></i>
                             Generate Impact Report
@@ -423,10 +398,7 @@
         });
     }
     
-    function downloadBufferData() {
-        const radius = document.querySelector('.buffer-btn.active').dataset.radius;
-        window.location.href = `/obstacle-compliance/api/buffers.geojson?radius=${radius}&icao={{ airport.icao_code }}&download=true`;
-    }
+    
     
     function generateReport() {
         showToast('Generating impact report...', 'info');
