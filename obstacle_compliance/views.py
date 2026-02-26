@@ -1,4 +1,4 @@
-# obstacle_compliance/views.py
+# obstacle_compliance/views.py - Updated views
 
 import json
 import logging
@@ -15,7 +15,7 @@ from django.contrib.gis.db.models.functions import Distance
 from django.contrib.gis.measure import D
 from django.core.cache import cache
 from django.conf import settings
-from django.db.models import Q, Count
+from django.db.models import Q, Count, Prefetch
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.cache import cache_page
@@ -43,34 +43,68 @@ class ObstacleComplianceDashboard(TemplateView):
         
         # Get statistics for the dashboard
         context['total_airports'] = Aerodrome.objects.count()
-        context['international_airports'] = Aerodrome.objects.filter(
-            Q(name__icontains='international') | Q(type__icontains='international')
-        ).count()
         
-        # Get buffer stats
-        context['buffer_stats'] = {
+        # Get buffer stats with counts
+        buffer_stats = {
             '3km': AerodromeBuffer.objects.filter(radius_km=3).count(),
             '5km': AerodromeBuffer.objects.filter(radius_km=5).count(),
             '10km': AerodromeBuffer.objects.filter(radius_km=10).count(),
             '15km': AerodromeBuffer.objects.filter(radius_km=15).count(),
         }
+        context['buffer_stats'] = buffer_stats
         
-        # Get recent airports (for quick access)
-        context['recent_airports'] = Aerodrome.objects.all()[:5]
+        # Get recent airports with prefetch for efficiency
+        context['recent_airports'] = Aerodrome.objects.all()[:5].select_related().prefetch_related('buffers')
         
         # Map configuration
         context['map_config'] = {
             'center': [-1.2864, 36.8172],  # Nairobi center
-            'zoom': 10,
+            'zoom': 7,  # Slightly zoomed out to show more of Kenya
             'max_zoom': 18,
             'min_zoom': 6,
+            'default_radius': 15,
         }
         
-        # Default buffer radius
-        context['default_radius'] = 15
+        # Available basemap options
+        context['basemaps'] = [
+            {
+                'id': 'osm',
+                'name': 'OpenStreetMap',
+                'url': 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                'attribution': '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                'thumbnail': 'https://a.tile.openstreetmap.org/0/0/0.png'
+            },
+            {
+                'id': 'satellite',
+                'name': 'Satellite',
+                'url': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                'attribution': '&copy; <a href="https://www.esri.com/">Esri</a>',
+                'thumbnail': 'https://www.esri.com/content/dam/esrisites/en-us/home/imagery/imagery-world-imagery.jpg'
+            },
+            {
+                'id': 'terrain',
+                'name': 'Terrain',
+                'url': 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                'attribution': '&copy; <a href="https://opentopomap.org/">OpenTopoMap</a>',
+                'thumbnail': 'https://opentopomap.org/resources/img/logo.png'
+            },
+            {
+                'id': 'carto-light',
+                'name': 'Carto Light',
+                'url': 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                'attribution': '&copy; <a href="https://www.carto.com/">CartoDB</a>',
+                'thumbnail': 'https://carto.com/favicon.ico'
+            },
+            {
+                'id': 'carto-dark',
+                'name': 'Carto Dark',
+                'url': 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                'attribution': '&copy; <a href="https://www.carto.com/">CartoDB</a>',
+                'thumbnail': 'https://carto.com/favicon.ico'
+            }
+        ]
         
         return context
-
 
 class AirportListView(ListView):
     """
@@ -397,14 +431,14 @@ class BufferGeoJSONView(View):
             radius = request.GET.get('radius', 15)
             icao = request.GET.get('icao')
             
-            # Build query
-            buffers = AerodromeBuffer.objects.filter(radius_km=radius)
+            # Build query with select_related for efficiency
+            buffers = AerodromeBuffer.objects.filter(radius_km=radius).select_related('aerodrome')
             
             if icao:
-                buffers = buffers.filter(aerodrome__icao_code=icao)
+                buffers = buffers.filter(aerodrome__icao_code=icao.upper())
             
-            # Limit for performance
-            buffers = buffers.select_related('aerodrome')[:50]
+            # Limit for performance (increase limit since we removed stats card)
+            buffers = buffers[:100]
             
             # Build GeoJSON
             features = []
@@ -464,17 +498,21 @@ class BufferGeoJSONView(View):
             15: '#4CAF50',  # Green for regulatory zone
         }
         return colors.get(radius, '#666666')
-
-
 # obstacle_compliance/views.py - Update AirportGeoJSONView
 
 class AirportGeoJSONView(View):
     """
-    Return airport points as GeoJSON for mapping
+    Return airport points as GeoJSON for mapping with enhanced properties
     """
+    @method_decorator(cache_page(60 * 30))  # Cache for 30 minutes
     def get(self, request):
         try:
+            # Get optional filter
+            icao = request.GET.get('icao')
+            
             airports = Aerodrome.objects.all()
+            if icao:
+                airports = airports.filter(icao_code=icao.upper())
             
             features = []
             for airport in airports:
@@ -483,6 +521,14 @@ class AirportGeoJSONView(View):
                         continue
                         
                     geom_json = json.loads(airport.geom.geojson)
+                    
+                    # Parse elevation display
+                    if airport.elevation_m:
+                        elevation_display = f"{airport.elevation_m:.0f}m"
+                    elif airport.elevation_m_ft:
+                        elevation_display = airport.elevation_m_ft
+                    else:
+                        elevation_display = "N/A"
                     
                     feature = {
                         'type': 'Feature',
@@ -493,7 +539,16 @@ class AirportGeoJSONView(View):
                             'name': airport.name or airport.admin_company or airport.icao_code,
                             'type': airport.type or 'Unknown',
                             'elevation': airport.elevation_m,
-                            'runway_info': f"Elevation: {airport.elevation_m}m",
+                            'elevation_display': elevation_display,
+                            'admin_company': airport.admin_company,
+                            'traffic_permitted': airport.traffic_permitted or 'Unknown',
+                            'has_buffer_3km': airport.buffers.filter(radius_km=3).exists(),
+                            'has_buffer_5km': airport.buffers.filter(radius_km=5).exists(),
+                            'has_buffer_10km': airport.buffers.filter(radius_km=10).exists(),
+                            'has_buffer_15km': airport.buffers.filter(radius_km=15).exists(),
+                            'marker_color': self._get_marker_color(airport.type),
+                            'marker_size': 'medium',
+                            'marker_symbol': 'airport',
                         }
                     }
                     features.append(feature)
@@ -504,7 +559,11 @@ class AirportGeoJSONView(View):
             
             geojson = {
                 'type': 'FeatureCollection',
-                'features': features
+                'features': features,
+                'metadata': {
+                    'count': len(features),
+                    'icao_filter': icao
+                }
             }
             
             return JsonResponse(geojson)
@@ -515,7 +574,21 @@ class AirportGeoJSONView(View):
                 'type': 'FeatureCollection',
                 'features': []
             })
-# ============================================
+    
+    def _get_marker_color(self, airport_type):
+        """Get marker color based on airport type"""
+        airport_type = (airport_type or '').lower()
+        
+        if 'international' in airport_type:
+            return '#dc3545'  # Red for international
+        elif 'domestic' in airport_type or 'national' in airport_type:
+            return '#0d6efd'  # Blue for domestic
+        elif 'military' in airport_type or 'air force' in airport_type:
+            return '#198754'  # Green for military
+        elif 'airstrip' in airport_type or 'private' in airport_type:
+            return '#ffc107'  # Yellow for small airstrips
+        else:
+            return '#6c757d'  # Gray for unknown# ============================================
 # SEARCH AND AUTOCOMPLETE VIEWS
 # ============================================
 
