@@ -2,6 +2,10 @@
 
 import json
 import logging
+import io
+from datetime import datetime
+from xhtml2pdf import pisa
+from django.template.loader import render_to_string
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse, HttpResponse
 from django.views import View
@@ -152,29 +156,33 @@ class AirportDetailView(DetailView):
             'counties_affected': self._get_counties_affected(airport),
             'runways': self._get_runway_info(airport),
         }
+    # ================================================================================
+    #to implement later when we have spatial data for counties and runways
+    # ================================================================================
+
     
-    def _get_counties_affected(self, airport):
-        """Get counties affected by this airport's 15km buffer"""
-        # This would ideally come from spatial intersection with county boundaries
-        # For now, return hardcoded based on airport location
-        airport_counties = {
-            'HKJK': ['Nairobi', 'Kajiado', 'Kiambu', 'Machakos'],
-            'HKNW': ['Nairobi', 'Kajiado', 'Kiambu'],
-            'HKMO': ['Mombasa', 'Kilifi', 'Kwale'],
-            'HKKI': ['Kisumu', 'Vihiga', 'Kericho'],
-            'HKEL': ['Uasin Gishu', 'Trans Nzoia', 'Nandi'],
-        }
-        return airport_counties.get(airport.icao_code, ['Nairobi County'])
+    # def _get_counties_affected(self, airport):
+    #     """Get counties affected by this airport's 15km buffer"""
+    #     # This would ideally come from spatial intersection with county boundaries
+    #     # For now, return hardcoded based on airport location
+    #     airport_counties = {
+    #         'HKJK': ['Nairobi', 'Kajiado', 'Kiambu', 'Machakos'],
+    #         'HKNW': ['Nairobi', 'Kajiado', 'Kiambu'],
+    #         'HKMO': ['Mombasa', 'Kilifi', 'Kwale'],
+    #         'HKKI': ['Kisumu', 'Vihiga', 'Kericho'],
+    #         'HKEL': ['Uasin Gishu', 'Trans Nzoia', 'Nandi'],
+    #     }
+    #     return airport_counties.get(airport.icao_code, ['Nairobi County'])
     
-    def _get_runway_info(self, airport):
-        """Get runway information (placeholder)"""
-        # This would come from a Runway model in the future
-        runways = {
-            'HKJK': ['06/24 (4,117m)', '15/33 (4,267m)'],
-            'HKNW': ['07/25 (1,459m)', '14/32 (1,126m)'],
-            'HKMO': ['03/21 (3,350m)', '15/33 (1,463m)'],
-        }
-        return runways.get(airport.icao_code, ['Runway info not available'])
+    # def _get_runway_info(self, airport):
+    #     """Get runway information (placeholder)"""
+    #     # This would come from a Runway model in the future
+    #     runways = {
+    #         'HKJK': ['06/24 (4,117m)', '15/33 (4,267m)'],
+    #         'HKNW': ['07/25 (1,459m)', '14/32 (1,126m)'],
+    #         'HKMO': ['03/21 (3,350m)', '15/33 (1,463m)'],
+    #     }
+    #     return runways.get(airport.icao_code, ['Runway info not available'])
 
 
 # ============================================
@@ -572,49 +580,52 @@ class GeocodeView(View):
 
 class ComplianceReportView(View):
     """
-    Generate a PDF report for a property compliance check
+    Generate a professional PDF report for a property compliance check
     """
     def post(self, request):
         try:
             data = json.loads(request.body)
-            
-            # Get compliance data
             lat = data.get('lat')
             lon = data.get('lon')
             height = data.get('height', 30)
-            
+
             if not lat or not lon:
                 return JsonResponse({'error': 'Coordinates required'}, status=400)
-            
+
+            # 1. Calculate Compliance Data
             point = Point(float(lon), float(lat), srid=4326)
             result = calculator.evaluate_property_all_airports(point, float(height))
-            
-            # Generate PDF (placeholder - implement with ReportLab or WeasyPrint)
-            # For now, return JSON with report data
-            
-            report_data = {
-                'generated_at': __import__('datetime').datetime.now().isoformat(),
+
+            # 2. Prepare Template Context
+            context = {
+                'generated_at': datetime.now(),
                 'property': {
                     'latitude': lat,
                     'longitude': lon,
                     'height': height,
-                    'coordinates': f"{lat}, {lon}"
                 },
                 'compliance': result,
+                'status_color': '#dc3545' if result['status'] == 'HAZARD' else '#28a745',
                 'disclaimer': 'This report is generated for informational purposes only. '
                               'Official approval must be obtained from KCAA before construction.'
             }
+
+            # 3. Render HTML to String
+            html_string = render_to_string('obstacle_compliance/pdf_report_template.html', context) # the html file is to be created in the templates/obstacle_compliance/ directory with appropriate styling for PDF output
             
-            # In production, generate PDF and return file
-            
-            return JsonResponse({
-                'status': 'SUCCESS',
-                'message': 'Report generated',
-                'report': report_data,
-                'pdf_url': '#',  # URL to download PDF
-                'html_url': '#'  # URL to view HTML version
-            })
-            
+            # 4. Create PDF
+            result_file = io.BytesIO()
+            pisa_status = pisa.CreatePDF(io.BytesIO(html_string.encode("UTF-8")), dest=result_file)
+
+            if pisa_status.err:
+                return JsonResponse({'error': 'PDF generation failed'}, status=500)
+
+            # 5. Return PDF as Downloadable Response
+            result_file.seek(0)
+            response = HttpResponse(result_file, content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="KCAA_Compliance_{lat}_{lon}.pdf"'
+            return response
+
         except Exception as e:
             logger.error(f"Error generating report: {str(e)}", exc_info=True)
             return JsonResponse({'error': str(e)}, status=500)
