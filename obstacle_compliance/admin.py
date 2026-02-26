@@ -5,7 +5,8 @@ from leaflet.admin import LeafletGeoAdmin
 
 
 # Register your models here.
-from .models import Aerodrome #GazettedEstate
+from .models import Aerodrome, AerodromeBuffer
+ #GazettedEstate
 
 
 class Aerodromes(LeafletGeoAdmin):
@@ -16,8 +17,17 @@ class Aerodromes(LeafletGeoAdmin):
         "type",
         "admin_company",
     )
+    
 
+class AerodromeBuffers(LeafletGeoAdmin):
+    list_display = (
+        "aerodrome",
+        "radius_km",
+        "fid",
+    )
+    
 
 # admin.site.register(Aerodromes)
 admin.site.register(Aerodrome, Aerodromes)
 # admin.site.register(GazettedEstate)
+admin.site.register(AerodromeBuffer, AerodromeBuffers)
