@@ -126,35 +126,14 @@
                     <div class="mb-3">
                         <small class="text-muted d-block mb-2">Buffer Zones</small>
                         <div class="d-flex gap-2">
-                            <span class="badge bg-danger" title="3km Inner Zone">3km</span>
-                            <span class="badge bg-warning text-dark" title="5km Intermediate">5km</span>
-                            <span class="badge bg-info" title="10km Outer">10km</span>
-                            <span class="badge bg-success" title="15km Regulatory">15km</span>
+                            <span class="badge bg-success" title="3km Inner Zone">3km</span>
+                            <span class="badge bg-info text-dark" title="5km Intermediate">5km</span>
+                            <span class="badge bg-warning" title="10km Outer">10km</span>
+                            <span class="badge bg-danger" title="15km Regulatory">15km</span>
                         </div>
                     </div>
                     
-                    <!-- Quick Stats -->
-                    <div class="row g-2">
-                        <div class="col-4">
-                            <div class="bg-light rounded p-2 text-center">
-                                <small class="text-muted d-block">Area (15km)</small>
-                                <strong>704 km²</strong>
-                            </div>
-                        </div>
-                        <div class="col-4">
-                            <div class="bg-light rounded p-2 text-center">
-                                <small class="text-muted d-block">Counties</small>
-                                <strong>4</strong>
-                            </div>
-                        </div>
-                        <div class="col-4">
-                            <div class="bg-light rounded p-2 text-center">
-                                <small class="text-muted d-block">Restrictions</small>
-                                <strong>Active</strong>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                    
                 <div class="card-footer bg-white border-0">
                     <a href="{% url 'obstacle_compliance:airport_detail' airport.icao_code %}" 
                        class="btn btn-outline-primary w-100">
