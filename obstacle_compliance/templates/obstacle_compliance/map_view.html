@@ -463,12 +463,12 @@
     <div class="map-controls">
         <div class="controls-row">
             <div class="control-group">
-                <button class="control-btn" data-radius="3">
+                {% comment %} <button class="control-btn" data-radius="3">
                     <i class="fas fa-circle" style="color: #FF6B6B;"></i> 3km
                 </button>
                 <button class="control-btn" data-radius="5">
-                    <i class="fas fa-circle" style="color: #FFA500;"></i> 5km
-                </button>
+                    <i class="fas fa-circle" style="color: #796f5c;"></i> 5km
+                </button> {% endcomment %}
                 <button class="control-btn" data-radius="10">
                     <i class="fas fa-circle" style="color: #2196F3;"></i> 10km
                 </button>
@@ -829,20 +829,14 @@
                     L.geoJSON(data, {
                         pointToLayer: function(feature, latlng) {
                             const props = feature.properties || {};
-                            
-                            // Determine marker class based on airport type
-                            let markerClass = 'marker-airstrip';
-                            const type = (props.type || '').toLowerCase();
-                            if (type.includes('international')) markerClass = 'marker-international';
-                            else if (type.includes('domestic')) markerClass = 'marker-domestic';
-                            else if (type.includes('military') || type.includes('air force')) markerClass = 'marker-military';
+                            const markerColor = props.marker_color || '#0d6efd';
                             
                             const marker = L.marker(latlng, {
                                 icon: L.divIcon({
                                     className: 'custom-airport-marker',
-                                    html: `<div class="airport-marker ${markerClass}"></div>`,
-                                    iconSize: [12, 12],
-                                    iconAnchor: [6, 6]
+                                    html: `<div style="background-color: ${markerColor}; width: 10px; height: 10px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"></div>`,
+                                    iconSize: [6, 6],
+                                    iconAnchor: [5, 5]
                                 })
                             });
                             
@@ -854,11 +848,11 @@
                                         <tr><td>Type:</td><td>${props.type}</td></tr>
                                         <tr><td>Elevation:</td><td>${props.elevation_display}</td></tr>
                                     </table>
-                                    <div class="mt-2">
+                                    {% comment %} <div class="mt-2">
                                         <a href="/obstacle-compliance/airport/${props.icao}/" class="btn btn-sm btn-primary w-100">
                                             View Details
                                         </a>
-                                    </div>
+                                    </div> {% endcomment %}
                                 </div>
                             `);
                             
