@@ -4,32 +4,24 @@
 {% block title %}Dashboard - KCAA Obstacle Compliance{% endblock %}
 
 {% block content %}
-<div class="container-fluid py-4">
+<div class="container-fluid py-2 py-md-4">
     <!-- Header - Simplified -->
-    <div class="row mb-4">
+    <div class="row mb-3 mb-md-4">
         <div class="col-12">
             <div class="card border-0 bg-dark text-white">
-                <div class="card-body py-3">
-                    <div class="d-flex justify-content-between align-items-center">
+                <div class="card-body py-2 py-md-3">
+                    <div class="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
                         <div>
-                            <h4 class="mb-1">
+                            <h4 class="mb-0 fs-5 fs-md-4">
                                 <i class="fas fa-tachometer-alt me-2"></i>
-                                 Dashboard
+                                Dashboard
                             </h4>
-                            {% comment %} <p class="mb-0 opacity-75">
-                                <i class="fas fa-info-circle me-2"></i>
-                                Monitor and analyze development restrictions around Kenyan aerodromes
-                            </p> {% endcomment %}
                         </div>
                         <div class="d-flex gap-2">
-                            <span class="badge bg-white text-primary p-3">
+                            <span class="badge bg-white text-primary p-2 p-md-3">
                                 <i class="fas fa-plane me-2"></i>
                                 {{ total_airports }} ADs
                             </span>
-                            {% comment %} <span class="badge bg-white text-success p-3">
-                                <i class="fas fa-draw-polygon me-2"></i>
-                                {{ buffer_stats.15km }} Active Buffers
-                            </span> {% endcomment %}
                         </div>
                     </div>
                 </div>
@@ -41,35 +33,48 @@
     <div class="row">
         <div class="col-12 mb-4">
             <div class="card">
-                <div class="card-header bg-white py-3">
-                    <div class="d-flex justify-content-between align-items-center flex-wrap">
+                <div class="card-header bg-white py-2 py-md-3">
+                    <div class="d-flex flex-column flex-xl-row justify-content-between align-items-start align-items-xl-center gap-2">
                         <div>
-                            <h5 class="mb-0">
-                                <i class="fas  me-2 text-primary"></i>
+                            <h5 class="mb-0 fs-6 fs-md-5">
+                                <i class="fas fa-map-marked-alt me-2 text-primary"></i>
                                 Buffer Zones & Aerodromes Map
                             </h5>
                         </div>
-                        <div class="d-flex gap-2 mt-2 mt-sm-0">
-                            <!-- Buffer radius selector -->
-                            <div class="btn-group btn-group-sm" role="group" aria-label="Buffer radius">
-                                <button type="button" class="btn btn-outline-primary" data-radius="3">3km</button>
-                                <button type="button" class="btn btn-outline-primary" data-radius="5">5km</button>
-                                <button type="button" class="btn btn-outline-primary" data-radius="10">10km</button>
-                                <button type="button" class="btn btn-primary" data-radius="15" id="defaultRadiusBtn">15km</button>
-                                <div class="input-group input-group-sm" style="width: 120px;">
-    <input type="number" id="customRadiusInput" class="form-control" placeholder="Custom" min="1" max="50">
-    <span class="input-group-text">km</span>
-    <button class="btn btn-outline-primary" type="button" id="applyCustomRadius">
-        <i class="fas fa-check"></i>
-    </button>
-</div>
-
+                        <div class="d-flex flex-wrap gap-2 w-100 w-xl-auto">
+                            <!-- Buffer radius selector - Responsive -->
+                            <div class="d-flex flex-wrap gap-1" role="group" aria-label="Buffer radius">
+                                <button type="button" class="btn btn-sm btn-outline-primary" data-radius="5">5km</button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" data-radius="10">10km</button>
+                                <button type="button" class="btn btn-sm btn-primary" data-radius="15" id="defaultRadiusBtn">15km</button>
+                                <div class="d-flex" style="min-width: 140px;">
+                                    <input type="number" id="customRadiusInput" class="form-control form-control-sm" placeholder="Custom" min="1" max="50" style="width: 80px;">
+                                    <span class="input-group-text bg-light px-2">km</span>
+                                    <button class="btn btn-sm btn-outline-primary" type="button" id="applyCustomRadius">
+                                        <i class="fas fa-check"></i>
+                                    </button>
+                                </div>
                             </div>
                             
+                            <!-- Layer toggles as checkboxes -->
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button type="button" class="btn btn-outline-success active" id="toggleAirports">
+                                    <i class="fas fa-plane me-1"></i>
+                                    <span class="d-none d-sm-inline">Airports</span>
+                                    <span class="badge bg-success ms-1 status-indicator" style="display: none;">✓</span>
+                                </button>
+                                <button type="button" class="btn btn-outline-info active" id="toggleBuffers">
+                                    <i class="fas fa-draw-polygon me-1"></i>
+                                    <span class="d-none d-sm-inline">Buffers</span>
+                                    <span class="badge bg-info ms-1 status-indicator" style="display: none;">✓</span>
+                                </button>
+                            </div>
+
                             <!-- Basemap switcher dropdown -->
                             <div class="dropdown">
                                 <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" id="basemapDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                                    <i class="fas fa-layer-group me-1"></i> Basemap
+                                    <i class="fas fa-layer-group me-1"></i>
+                                    <span class="d-none d-sm-inline">Basemap</span>
                                 </button>
                                 <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="basemapDropdown" id="basemapList">
                                     <li><h6 class="dropdown-header">Select Basemap</h6></li>
@@ -81,16 +86,6 @@
                                 </ul>
                             </div>
                             
-                            <!-- Layer toggles -->
-                            <div class="btn-group btn-group-sm" role="group">
-                                <button type="button" class="btn btn-outline-success active" id="toggleAirports">
-                                    <i class="fas fa-plane me-1"></i> Airports
-                                </button>
-                                <button type="button" class="btn btn-outline-info active" id="toggleBuffers">
-                                    <i class="fas fa-draw-polygon me-1"></i> Buffers
-                                </button>
-                            </div>
-                            
                             <!-- Fullscreen button -->
                             <a href="{% url 'obstacle_compliance:map_view' %}" class="btn btn-sm btn-outline-primary" title="Open full map">
                                 <i class="fas fa-expand"></i>
@@ -99,22 +94,22 @@
                     </div>
                 </div>
                 <div class="card-body p-0">
-                    <div id="dashboardMap" class="map-container" style="height: 550px; width: 100%;"></div>
+                    <div id="dashboardMap" class="map-container" style="height: 400px; width: 100%;"></div>
                 </div>
                 <div class="card-footer bg-white py-2">
                     <div class="row align-items-center">
-                        <div class="col-md-6">
-                            <small class="text-muted">
+                        <div class="col-12 col-md-6 mb-2 mb-md-0">
+                            <small class="text-muted d-block d-sm-inline">
                                 <i class="fas fa-info-circle me-1"></i>
                                 Showing <span id="airportCount">{{ total_airports }}</span> aerodromes and <span id="bufferCount">{{ buffer_stats.15km }}</span> buffer zones
                             </small>
                         </div>
-                        <div class="col-md-6 text-end">
-                            <div class="legend d-inline-flex gap-3">
-                                <span><i class="fas fa-circle text-danger me-1"></i> 3km</span>
-                                <span><i class="fas fa-circle text-warning me-1"></i> 5km</span>
-                                <span><i class="fas fa-circle text-primary me-1"></i> 10km</span>
-                                <span><i class="fas fa-circle text-success me-1"></i> 15km</span>
+                        <div class="col-12 col-md-6">
+                            <div class="legend d-flex flex-wrap justify-content-start justify-content-md-end gap-2 gap-md-3">
+                                <span class="small"><i class="fas fa-circle text-warning me-1"></i> 5km</span>
+                                <span class="small"><i class="fas fa-circle text-primary me-1"></i> 10km</span>
+                                <span class="small"><i class="fas fa-circle text-success me-1"></i> 15km</span>
+                                <span class="small"><i class="fas fa-circle text-secondary me-1"></i> Custom</span>
                             </div>
                         </div>
                     </div>
@@ -124,57 +119,13 @@
     </div>
 
     <!-- Quick Actions and Airports Table -->
-    <div class="row">
-        <!-- Quick Actions -->
-        <div class="col-lg-4 mb-4">
-            <div class="card h-100">
-                <div class="card-header bg-white py-3">
-                    <h5 class="mb-0">
-                        <i class="fas fa-bolt me-2 text-primary"></i>
-                        Quick Actions
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <div class="d-grid gap-3">
-                        <a href="{% url 'obstacle_compliance:property_check' %}" class="btn btn-primary btn-lg">
-                            <i class="fas fa-search me-2"></i>
-                            Check coming soon
-                        </a>
-                        <a href="{% url 'obstacle_compliance:map_view' %}" class="btn btn-outline-primary">
-                            <i class="fas fa-globe-africa me-2"></i>
-                            Open Interactive Map
-                        </a>
-                        {% comment %} <a href="{% url 'obstacle_compliance:airport_list' %}" class="btn btn-outline-primary">
-                            <i class="fas fa-list me-2"></i>
-                            View All Airports
-                        </a> {% endcomment %}
-                        <hr>
-                        <div class="bg-light p-3 rounded">
-                            <h6 class="mb-2"><i class="fas fa-chart-simple me-2"></i>System Status</h6>
-                            <div class="d-flex justify-content-between mb-1">
-                                <span>Total Aerodromes:</span>
-                                <span class="fw-bold">{{ total_airports }}</span>
-                            </div>
-                            {% comment %} <div class="d-flex justify-content-between mb-1">
-                                <span>Buffers (15km):</span>
-                                <span class="fw-bold">{{ buffer_stats.15km }}</span>
-                            </div> {% endcomment %}
-                            <div class="d-flex justify-content-between">
-                                <span>Last Updated:</span>
-                                <span class="fw-bold">{% now "d M Y" %}</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
+    <div class="row g-3">
         <!-- Airports Table -->
-        <div class="col-lg-8 mb-4">
+        <div class="col-12 col-lg-8 mb-0">
             <div class="card h-100">
-                <div class="card-header bg-white py-3">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">
+                <div class="card-header bg-white py-2 py-md-3">
+                    <div class="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
+                        <h5 class="mb-0 fs-6 fs-md-5">
                             <i class="fas fa-plane me-2 text-primary"></i>
                             Recent Aerodromes
                         </h5>
@@ -184,58 +135,52 @@
                     </div>
                 </div>
                 <div class="card-body p-0">
-                    <div class="table-responsive">
+                    <div class="table-responsive" style="max-height: 300px;">
                         <table class="table table-hover mb-0">
-                            <thead class="table-light">
+                            <thead class="table-light sticky-top">
                                 <tr>
-                                    <th>ICAO</th>
-                                    <th>Name</th>
-                                    <th>Type</th>
-                                    <th>Elevation</th>
-                                    <th>15km Buffer</th>
-                                    <th>Actions</th>
+                                    <th class="small">ICAO</th>
+                                    <th class="small">Name</th>
+                                    <th class="small d-none d-md-table-cell">Type</th>
+                                    <th class="small d-none d-sm-table-cell">Elevation</th>
+                                    <th class="small">15km Buffer</th>
+                                    <th class="small">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for airport in recent_airports %}
                                 <tr>
-                                    <td><span class="fw-bold">{{ airport.icao_code }}</span></td>
-                                    <td>{{ airport.name|default:airport.admin_company|truncatechars:30 }}</td>
-                                    <td>
-                                        <span class="badge bg-info">{{ airport.type|default:"N/A" }}</span>
+                                    <td><span class="fw-bold small">{{ airport.icao_code }}</span></td>
+                                    <td class="small">{{ airport.name|default:airport.admin_company|truncatechars:20 }}</td>
+                                    <td class="d-none d-md-table-cell">
+                                        <span class="badge bg-info small">{{ airport.type|default:"N/A" }}</span>
                                     </td>
-                                    <td>
+                                    <td class="small d-none d-sm-table-cell">
                                         {% if airport.elevation_m %}
                                             {{ airport.elevation_m|floatformat:0 }}m
                                         {% elif airport.elevation_m_ft %}
-                                            {{ airport.elevation_m_ft|truncatechars:15 }}
+                                            {{ airport.elevation_m_ft|truncatechars:10 }}
                                         {% else %}
                                             N/A
                                         {% endif %}
                                     </td>
                                     <td>
                                         {% if airport.buffers.all %}
-                                            <span class="badge bg-success">Active</span>
+                                            <span class="badge bg-success small">Active</span>
                                         {% else %}
-                                            <span class="badge bg-secondary">Pending</span>
+                                            <span class="badge bg-secondary small">Pending</span>
                                         {% endif %}
                                     </td>
                                     <td>
-                                        <div class="btn-group btn-group-sm">
-                                            {% comment %} <a href="{% url 'obstacle_compliance:airport_detail' airport.icao_code %}" 
-                                               class="btn btn-outline-primary" title="View Details">
-                                                <i class="fas fa-eye"></i>
-                                            </a> {% endcomment %}
-                                            <a href="{% url 'obstacle_compliance:map_view' %}?airport={{ airport.icao_code }}&radius=15" 
-                                               class="btn btn-outline-info" title="View on Map">
-                                                <i class="fas fa-map-marker-alt"></i>
-                                            </a>
-                                        </div>
+                                        <a href="{% url 'obstacle_compliance:map_view' %}?airport={{ airport.icao_code }}&radius=15" 
+                                           class="btn btn-sm btn-outline-info" title="View on Map">
+                                            <i class="fas fa-map-marker-alt"></i>
+                                        </a>
                                     </td>
                                 </tr>
                                 {% empty %}
                                 <tr>
-                                    <td colspan="6" class="text-center py-4 text-muted">
+                                    <td colspan="6" class="text-center py-4 text-muted small">
                                         <i class="fas fa-info-circle me-2"></i>
                                         No airports found
                                     </td>
@@ -245,13 +190,67 @@
                         </table>
                     </div>
                 </div>
-                {% if recent_airports %}
-                <div class="card-footer bg-white py-2 text-end">
-                    <small class="text-muted">
-                        Showing {{ recent_airports|length }} of {{ total_airports }} aerodromes
-                    </small>
+            </div>
+        </div>
+
+        <!-- Quick Actions and System Status Stacked -->
+        <div class="col-12 col-lg-4 mb-0">
+            <div class="d-flex flex-column gap-3">
+                <!-- Quick Actions -->
+                <div class="card">
+                    <div class="card-header bg-white py-2 py-md-3">
+                        <h5 class="mb-0 fs-6 fs-md-5">
+                            <i class="fas fa-bolt me-2 text-primary"></i>
+                            Quick Actions
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-grid gap-2 gap-md-3">
+                            <a href="{% url 'obstacle_compliance:property_check' %}" class="btn btn-primary">
+                                <i class="fas fa-search me-2"></i>
+                                Check coming soon
+                            </a>
+                            <a href="{% url 'obstacle_compliance:map_view' %}" class="btn btn-outline-primary">
+                                <i class="fas fa-globe-africa me-2"></i>
+                                Open Interactive Map
+                            </a>
+                        </div>
+                    </div>
                 </div>
-                {% endif %}
+
+                <!-- Modern System Status -->
+                <div class="card">
+                    <div class="card-header bg-white py-2 py-md-3">
+                        <h5 class="mb-0 fs-6 fs-md-5">
+                            <i class="fas fa-chart-line me-2 text-primary"></i>
+                            System Status
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-6">
+                                <div class="text-center p-3 bg-light rounded-3">
+                                    <div class="h5 mb-2 text-primary">{{ total_airports }}</div>
+                                    <div class="small text-muted">Aerodromes</div>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="text-center p-3 bg-light rounded-3">
+                                    <div class="h5 mb-2 text-success">
+                                        <i class="fas fa-check-circle"></i>
+                                    </div>
+                                    <div class="small text-muted">Operational</div>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="text-center p-3 bg-light rounded-3">
+                                    <div class="small text-muted mb-1">Last Updated</div>
+                                    <div class="h6 mb-0 text-dark">{% now "d M Y, H:i" %}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -261,13 +260,22 @@
 {% block extra_js %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // Initialize map with larger size
-        var map = L.map('dashboardMap', {
+        // Initialize map with responsive height
+        var mapContainer = document.getElementById('dashboardMap');
+        var map = L.map(mapContainer, {
             center: [-1.2864, 36.8172],
             zoom: 7,
             zoomControl: true,
             fadeAnimation: true,
-            markerZoomAnimation: true
+            markerZoomAnimation: true,
+            responsive: true
+        });
+        
+        // Adjust map on window resize
+        window.addEventListener('resize', function() {
+            setTimeout(function() {
+                map.invalidateSize();
+            }, 100);
         });
         
         // Define basemaps
@@ -292,7 +300,7 @@
         // Add default basemap
         basemaps['carto-light'].addTo(map);
         
-        // Layer groups for better management
+        // Layer groups
         var airportLayer = L.layerGroup().addTo(map);
         var bufferLayer = L.layerGroup().addTo(map);
         
@@ -301,37 +309,56 @@
         var showBuffers = true;
         var currentRadius = 15;
 
-        
-
-    const customInput = document.getElementById('customRadiusInput');
-    const applyBtn = document.getElementById('applyCustomRadius');
-
-    applyBtn.addEventListener('click', function() {
-        const radius = parseFloat(customInput.value);
-        
-        if (isNaN(radius) || radius <= 0) {
-            showToast('Please enter a valid radius', 'warning');
-            return;
+        // Add status indicators for layer toggles
+        function updateLayerIndicators() {
+            const airportBtn = document.getElementById('toggleAirports');
+            const bufferBtn = document.getElementById('toggleBuffers');
+            
+            if (showAirports) {
+                airportBtn.classList.add('active');
+                airportBtn.querySelector('.status-indicator').style.display = 'inline-block';
+            } else {
+                airportBtn.classList.remove('active');
+                airportBtn.querySelector('.status-indicator').style.display = 'none';
+            }
+            
+            if (showBuffers) {
+                bufferBtn.classList.add('active');
+                bufferBtn.querySelector('.status-indicator').style.display = 'inline-block';
+            } else {
+                bufferBtn.classList.remove('active');
+                bufferBtn.querySelector('.status-indicator').style.display = 'none';
+            }
         }
 
-        // Deactivate standard buttons
-        document.querySelectorAll('[data-radius]').forEach(b => {
-            b.classList.remove('btn-primary');
-            b.classList.add('btn-outline-primary');
+        // Custom radius input
+        const customInput = document.getElementById('customRadiusInput');
+        const applyBtn = document.getElementById('applyCustomRadius');
+
+        applyBtn.addEventListener('click', function() {
+            const radius = parseFloat(customInput.value);
+            
+            if (isNaN(radius) || radius <= 0) {
+                showToast('Please enter a valid radius', 'warning');
+                return;
+            }
+
+            document.querySelectorAll('[data-radius]').forEach(b => {
+                b.classList.remove('btn-primary');
+                b.classList.add('btn-outline-primary');
+            });
+
+            currentRadius = radius;
+            if (showBuffers) {
+                loadBuffers(radius);
+            }
         });
 
-        currentRadius = radius;
-        if (showBuffers) {
-            loadBuffers(radius);
-        }
-    });
-
-    // Optional: Also trigger on "Enter" key
-    customInput.addEventListener('keypress', function (e) {
-        if (e.key === 'Enter') {
-            applyBtn.click();
-        }
-    });
+        customInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                applyBtn.click();
+            }
+        });
         
         // Load initial data
         loadAirports();
@@ -342,7 +369,6 @@
             btn.addEventListener('click', function() {
                 const radius = parseInt(this.getAttribute('data-radius'));
                 
-                // Update button states
                 document.querySelectorAll('[data-radius]').forEach(b => {
                     b.classList.remove('btn-primary');
                     b.classList.add('btn-outline-primary');
@@ -351,6 +377,8 @@
                 this.classList.add('btn-primary');
                 
                 currentRadius = radius;
+                customInput.value = '';
+                
                 if (showBuffers) {
                     loadBuffers(radius);
                 }
@@ -363,49 +391,52 @@
                 e.preventDefault();
                 const basemapId = this.getAttribute('data-basemap');
                 
-                // Remove active class from all
                 document.querySelectorAll('[data-basemap]').forEach(i => {
                     i.classList.remove('active');
                 });
                 this.classList.add('active');
                 
-                // Remove all current basemaps
                 Object.values(basemaps).forEach(layer => {
                     if (map.hasLayer(layer)) {
                         map.removeLayer(layer);
                     }
                 });
                 
-                // Add selected basemap
                 basemaps[basemapId].addTo(map);
             });
         });
         
-        // Toggle airports
+        // Toggle airports - now with checkbox style
         document.getElementById('toggleAirports').addEventListener('click', function() {
             showAirports = !showAirports;
-            this.classList.toggle('active', showAirports);
+            updateLayerIndicators();
             
             if (showAirports) {
-                airportLayer.addTo(map);
+                if (!map.hasLayer(airportLayer)) {
+                    airportLayer.addTo(map);
+                }
                 loadAirports();
             } else {
-                map.removeLayer(airportLayer);
-                airportLayer = L.layerGroup();
+                if (map.hasLayer(airportLayer)) {
+                    map.removeLayer(airportLayer);
+                }
             }
         });
         
-        // Toggle buffers
+        // Toggle buffers - now with checkbox style
         document.getElementById('toggleBuffers').addEventListener('click', function() {
             showBuffers = !showBuffers;
-            this.classList.toggle('active', showBuffers);
+            updateLayerIndicators();
             
             if (showBuffers) {
-                bufferLayer.addTo(map);
+                if (!map.hasLayer(bufferLayer)) {
+                    bufferLayer.addTo(map);
+                }
                 loadBuffers(currentRadius);
             } else {
-                map.removeLayer(bufferLayer);
-                bufferLayer = L.layerGroup();
+                if (map.hasLayer(bufferLayer)) {
+                    map.removeLayer(bufferLayer);
+                }
             }
         });
         
@@ -415,48 +446,45 @@
             fetch('/obstacle-compliance/api/airports.geojson')
                 .then(response => response.json())
                 .then(data => {
-                    // Clear existing airport layer
-                    map.removeLayer(airportLayer);
+                    if (map.hasLayer(airportLayer)) {
+                        map.removeLayer(airportLayer);
+                    }
                     airportLayer = L.layerGroup();
                     
-                    // Add airports with custom markers
                     L.geoJSON(data, {
                         pointToLayer: function(feature, latlng) {
                             const props = feature.properties || {};
                             const markerColor = props.marker_color || '#0d6efd';
                             
-                            // Create custom marker
                             const marker = L.marker(latlng, {
                                 icon: L.divIcon({
                                     className: 'custom-airport-marker',
-                                    html: `<div style="background-color: ${markerColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"></div>`,
-                                    iconSize: [12, 12],
-                                    iconAnchor: [6, 6]
+                                    html: `<div style="background-color: ${markerColor}; width: 10px; height: 10px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"></div>`,
+                                    iconSize: [10, 10],
+                                    iconAnchor: [5, 5]
                                 })
                             });
                             
-                            // Bind popup
                             marker.bindPopup(`
-                                <div style="min-width: 200px;">
-                                    <h6 style="margin-bottom: 5px; font-weight: 600;">
+                                <div style="min-width: 180px; max-width: 250px;">
+                                    <h6 style="margin-bottom: 5px; font-weight: 600; font-size: 14px;">
                                         ${props.name || props.icao}
                                     </h6>
-                                    <p style="margin-bottom: 3px;">
+                                    <p style="margin-bottom: 3px; font-size: 12px;">
                                         <strong>ICAO:</strong> ${props.icao || 'N/A'}<br>
                                         <strong>Type:</strong> ${props.type || 'Unknown'}<br>
-                                        <strong>Elevation:</strong> ${props.elevation_display || 'N/A'}<br>
-                                        ${props.traffic_permitted ? `<strong>Traffic:</strong> ${props.traffic_permitted}` : ''}
+                                        <strong>Elevation:</strong> ${props.elevation_display || 'N/A'}
                                     </p>
-                                    <div style="margin-top: 8px;">
+                                    <div style="margin-top: 8px; display: flex; gap: 5px;">
                                         <a href="/obstacle-compliance/airport/${props.icao}/" 
                                            class="btn btn-sm btn-primary" 
-                                           style="padding: 2px 8px; font-size: 12px; text-decoration: none; color: white;">
-                                            View Details
+                                           style="padding: 2px 8px; font-size: 11px; text-decoration: none; color: white;">
+                                            Details
                                         </a>
                                         <a href="/obstacle-compliance/map/?airport=${props.icao}&radius=${currentRadius}" 
                                            class="btn btn-sm btn-outline-secondary" 
-                                           style="padding: 2px 8px; font-size: 12px; text-decoration: none;">
-                                            Show on Map
+                                           style="padding: 2px 8px; font-size: 11px; text-decoration: none;">
+                                            Map
                                         </a>
                                     </div>
                                 </div>
@@ -466,7 +494,9 @@
                         }
                     }).addTo(airportLayer);
                     
-                    airportLayer.addTo(map);
+                    if (!map.hasLayer(airportLayer)) {
+                        airportLayer.addTo(map);
+                    }
                     document.getElementById('airportCount').textContent = data.features.length;
                 })
                 .catch(error => {
@@ -481,11 +511,11 @@
             fetch(`/obstacle-compliance/api/buffers.geojson?radius=${radius}`)
                 .then(response => response.json())
                 .then(data => {
-                    // Clear existing buffer layer
-                    map.removeLayer(bufferLayer);
+                    if (map.hasLayer(bufferLayer)) {
+                        map.removeLayer(bufferLayer);
+                    }
                     bufferLayer = L.layerGroup();
                     
-                    // Add new buffers
                     L.geoJSON(data, {
                         style: function(feature) {
                             return {
@@ -499,25 +529,22 @@
                         onEachFeature: function(feature, layer) {
                             const props = feature.properties || {};
                             layer.bindPopup(`
-                                <div>
-                                    <h6 style="margin-bottom: 5px; font-weight: 600;">
+                                <div style="max-width: 200px;">
+                                    <h6 style="margin-bottom: 5px; font-weight: 600; font-size: 14px;">
                                         ${props.airport_name}
                                     </h6>
-                                    <p style="margin-bottom: 3px;">
+                                    <p style="margin-bottom: 3px; font-size: 12px;">
                                         <strong>ICAO:</strong> ${props.airport_icao}<br>
-                                        <strong>Buffer:</strong> ${props.radius_km}km<br>
-                                        ${props.area_km2 ? `<strong>Area:</strong> ${props.area_km2.toFixed(2)} km²` : ''}
+                                        <strong>Buffer:</strong> ${props.radius_km}km
                                     </p>
-                                    <a href="/obstacle-compliance/airport/${props.airport_icao}/" 
-                                       style="font-size: 12px; text-decoration: none;">
-                                        View Airport Details →
-                                    </a>
                                 </div>
                             `);
                         }
                     }).addTo(bufferLayer);
                     
-                    bufferLayer.addTo(map);
+                    if (!map.hasLayer(bufferLayer)) {
+                        bufferLayer.addTo(map);
+                    }
                     document.getElementById('bufferCount').textContent = data.features.length;
                 })
                 .catch(error => {
@@ -527,10 +554,15 @@
         }
         
         // Add scale control
-        L.control.scale({ imperial: false, metric: true }).addTo(map);
+        L.control.scale({ imperial: false, metric: true, maxWidth: 150 }).addTo(map);
         
-        // Add fullscreen control
-        map.addControl(new L.Control.Fullscreen());
+        // Initial update of layer indicators
+        updateLayerIndicators();
+        
+        // Force map resize after a short delay to ensure proper rendering
+        setTimeout(function() {
+            map.invalidateSize();
+        }, 200);
     });
 </script>
 
@@ -545,11 +577,11 @@
     }
     
     .legend span {
-        font-size: 0.85rem;
+        font-size: 0.8rem;
     }
     
     .legend i {
-        font-size: 0.7rem;
+        font-size: 0.6rem;
     }
     
     .btn-group .btn.active {
@@ -558,7 +590,115 @@
     }
     
     #dashboardMap {
-        border-radius: 0 0 12px 12px;
+        border-radius: 0;
+        height: 400px;
+    }
+    
+    /* Status indicator styles */
+    .status-indicator {
+        font-size: 10px;
+        padding: 2px 4px;
+        margin-left: 5px;
+    }
+    
+    /* Responsive table improvements */
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .table td, .table th {
+        white-space: nowrap;
+    }
+    
+    @media (min-width: 768px) {
+        .table td, .table th {
+            white-space: normal;
+        }
+    }
+    
+    /* Better touch targets for mobile */
+    @media (max-width: 576px) {
+        .btn-sm {
+            padding: 0.4rem 0.6rem;
+            font-size: 0.75rem;
+        }
+        
+        #dashboardMap {
+            height: 350px;
+        }
+        
+        .status-indicator {
+            display: inline-block !important;
+        }
+    }
+    
+    /* Sticky header for table */
+    .sticky-top {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+    
+    /* Custom scrollbar for table */
+    .table-responsive::-webkit-scrollbar {
+        height: 6px;
+        width: 6px;
+    }
+    
+    .table-responsive::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 10px;
+    }
+    
+    .table-responsive::-webkit-scrollbar-thumb {
+        background: #c1c1c1;
+        border-radius: 10px;
+    }
+    
+    .table-responsive::-webkit-scrollbar-thumb:hover {
+        background: #a8a8a8;
+    }
+    
+    /* Modern system status styling */
+    .bg-light.rounded-3 {
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        border: 1px solid rgba(0,0,0,0.03);
+    }
+    
+    .bg-light.rounded-3:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+    
+    /* Input group improvements */
+    .input-group-text {
+        font-size: 0.875rem;
+    }
+    
+    /* Remove bottom margin from last row */
+    .row.g-3 {
+        margin-bottom: 0;
+    }
+    
+    /* Ensure no extra spacing at bottom */
+    .container-fluid {
+        padding-bottom: 0;
+    }
+    
+    /* Fix for mobile spacing */
+    @media (max-width: 767.98px) {
+        .container-fluid {
+            padding-bottom: 0;
+        }
+        
+        .row.g-3 > [class*="col-"] {
+            margin-bottom: 0;
+        }
+        
+        .card {
+            margin-bottom: 0;
+        }
     }
 </style>
 {% endblock %}
