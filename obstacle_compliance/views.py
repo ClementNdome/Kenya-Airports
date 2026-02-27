@@ -1,219 +1,999 @@
-# obstacle_compliance/views.py
-from django.shortcuts import render, get_object_or_404
-from django.http import JsonResponse
-from django.contrib.gis.geos import Point
-from django.contrib.gis.db.models.functions import Distance
-from django.views.generic import TemplateView
-from django.views.decorators.http import require_GET
-from airports_strips.models import Airports
-from .models import AerodromeBuffer, Property, Building, ComplianceCheck
-from .utils import check_building_compliance, calculate_max_allowed_height
-import json
+# obstacle_compliance/views.py - Updated views
 
-class ObstacleDashboardView(TemplateView):
-    """Main dashboard for obstacle limitation"""
+import json
+import logging
+import io
+from datetime import datetime
+from xhtml2pdf import pisa
+from django.template.loader import render_to_string
+from django.shortcuts import render, get_object_or_404
+from django.http import JsonResponse, HttpResponse
+from django.views import View
+from django.views.generic import TemplateView, ListView, DetailView
+from django.contrib.gis.geos import Point, GEOSGeometry
+from django.contrib.gis.db.models.functions import Distance
+from django.contrib.gis.measure import D
+from django.core.cache import cache
+from django.conf import settings
+from django.db.models import Q, Count, Prefetch
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.cache import cache_page
+from django.core.paginator import Paginator
+from django.urls import reverse
+
+from .models import Aerodrome, AerodromeBuffer
+from .utils import ComplianceCalculator, DEMService
+from obstacle_compliance import models
+
+logger = logging.getLogger(__name__)
+calculator = ComplianceCalculator()
+
+# ============================================
+# MAIN DASHBOARD VIEWS
+# ============================================
+
+class ObstacleComplianceDashboard(TemplateView):
+    """
+    Main dashboard view for the Obstacle Compliance tool
+    """
     template_name = 'obstacle_compliance/dashboard.html'
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         
-        # Get all airports for selector
-        context['airports'] = Airports.objects.all().order_by('name')
+        # Get statistics for the dashboard
+        context['total_airports'] = Aerodrome.objects.count()
         
-        # Default to first airport or specified one
-        airport_id = self.request.GET.get('airport')
-        if airport_id:
-            context['selected_airport'] = get_object_or_404(Airports, id=airport_id)
-        else:
-            context['selected_airport'] = Airports.objects.first()
+        # Get buffer stats with counts
+        buffer_stats = {
+            '3km': AerodromeBuffer.objects.filter(radius_km=3).count(),
+            '5km': AerodromeBuffer.objects.filter(radius_km=5).count(),
+            '10km': AerodromeBuffer.objects.filter(radius_km=10).count(),
+            '15km': AerodromeBuffer.objects.filter(radius_km=15).count(),
+        }
+        context['buffer_stats'] = buffer_stats
         
-        # Default radius
-        context['default_radius'] = int(self.request.GET.get('radius', 15))
+        # Get recent airports with prefetch for efficiency
+        context['recent_airports'] = Aerodrome.objects.all()[:5].select_related().prefetch_related('buffers')
         
-        # Available radii presets
-        context['radii_presets'] = [3, 5, 8, 10, 15, 20, 30, 50]
+        # Map configuration
+        context['map_config'] = {
+            'center': [-1.2864, 36.8172],  # Nairobi center
+            'zoom': 7,  # Slightly zoomed out to show more of Kenya
+            'max_zoom': 18,
+            'min_zoom': 6,
+            'default_radius': 15,
+        }
+        
+        # Available basemap options
+        context['basemaps'] = [
+            {
+                'id': 'osm',
+                'name': 'OpenStreetMap',
+                'url': 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                'attribution': '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                'thumbnail': 'https://a.tile.openstreetmap.org/0/0/0.png'
+            },
+            {
+                'id': 'satellite',
+                'name': 'Satellite',
+                'url': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                'attribution': '&copy; <a href="https://www.esri.com/">Esri</a>',
+                'thumbnail': 'https://www.esri.com/content/dam/esrisites/en-us/home/imagery/imagery-world-imagery.jpg'
+            },
+            {
+                'id': 'terrain',
+                'name': 'Terrain',
+                'url': 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                'attribution': '&copy; <a href="https://opentopomap.org/">OpenTopoMap</a>',
+                'thumbnail': 'https://opentopomap.org/resources/img/logo.png'
+            },
+            {
+                'id': 'carto-light',
+                'name': 'Carto Light',
+                'url': 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                'attribution': '&copy; <a href="https://www.carto.com/">CartoDB</a>',
+                'thumbnail': 'https://carto.com/favicon.ico'
+            },
+            {
+                'id': 'carto-dark',
+                'name': 'Carto Dark',
+                'url': 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                'attribution': '&copy; <a href="https://www.carto.com/">CartoDB</a>',
+                'thumbnail': 'https://carto.com/favicon.ico'
+            }
+        ]
         
         return context
 
-@require_GET
-def get_buffer_data(request):
-    """API endpoint for buffer data"""
-    airport_id = request.GET.get('airport_id')
-    radius = int(request.GET.get('radius', 15))
+class AirportListView(ListView):
+    """
+    List all airports with filtering and search
+    """
+    model = Aerodrome
+    template_name = 'obstacle_compliance/airport_list.html'
+    context_object_name = 'airports'
+    paginate_by = 20
     
-    try:
-        airport = Airports.objects.get(id=airport_id)
+    def get_queryset(self):
+        queryset = Aerodrome.objects.all().order_by('name')
         
-        # Get or generate buffer
-        buffer, created = AerodromeBuffer.objects.get_or_create(
-            airport=airport,
-            radius_km=radius,
-            defaults={
-                'geometry': Point(airport.longitude, airport.latitude, srid=4326).buffer(radius * 1000),
-                'area_sqkm': 3.14159 * (radius ** 2)
+        # Search functionality
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) |
+                Q(icao_code__icontains=search) |
+                Q(admin_company__icontains=search) |
+                Q(type__icontains=search)
+            )
+        
+        # Filter by type
+        airport_type = self.request.GET.get('type', '')
+        if airport_type:
+            queryset = queryset.filter(type__icontains=airport_type)
+        
+        return queryset
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['search'] = self.request.GET.get('search', '')
+        # context['airport_type'] = self.request.GET.get('type', '')
+        # context['airport_types'] = Aerodrome.objects.values_list('type', flat=True).distinct().order_by('type')
+        return context
+
+
+class AirportDetailView(DetailView):
+    """
+    Detailed view for a single airport with buffer visualization
+    """
+    model = Aerodrome
+    template_name = 'obstacle_compliance/airport_detail.html'
+    context_object_name = 'airport'
+    slug_field = 'icao_code'
+    slug_url_kwarg = 'icao'
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        airport = self.get_object()
+        
+        # Get all buffers for this airport
+        buffers = AerodromeBuffer.objects.filter(aerodrome=airport).order_by('radius_km')
+        context['buffers'] = buffers
+        
+        # Get buffer at specific radius if requested
+        radius = self.request.GET.get('radius', 15)
+        try:
+            context['selected_buffer'] = buffers.get(radius_km=int(radius))
+        except (AerodromeBuffer.DoesNotExist, ValueError):
+            context['selected_buffer'] = buffers.filter(radius_km=15).first()
+        
+        # Count overlapping airports
+        if context['selected_buffer']:
+            overlapping = AerodromeBuffer.objects.filter(
+                radius_km=15,
+                geom__overlaps=context['selected_buffer'].geom
+            ).exclude(aerodrome=airport).select_related('aerodrome')
+            context['overlapping_airports'] = overlapping[:10]
+            context['overlapping_count'] = overlapping.count()
+        
+        # Airport statistics
+        context.update(self._get_airport_stats(airport))
+        
+        return context
+    
+    def _get_airport_stats(self, airport):
+        """Calculate statistics for the airport"""
+        # Get all properties in buffer (placeholder - will be implemented with property model later)
+        return {
+            'estimated_properties': 15000,  # Placeholder
+            'counties_affected': self._get_counties_affected(airport),
+            'runways': self._get_runway_info(airport),
+        }
+    # ================================================================================
+    #to implement later when we have spatial data for counties and runways
+    # ================================================================================
+
+    
+    # def _get_counties_affected(self, airport):
+    #     """Get counties affected by this airport's 15km buffer"""
+    #     # This would ideally come from spatial intersection with county boundaries
+    #     # For now, return hardcoded based on airport location
+    #     airport_counties = {
+    #         'HKJK': ['Nairobi', 'Kajiado', 'Kiambu', 'Machakos'],
+    #         'HKNW': ['Nairobi', 'Kajiado', 'Kiambu'],
+    #         'HKMO': ['Mombasa', 'Kilifi', 'Kwale'],
+    #         'HKKI': ['Kisumu', 'Vihiga', 'Kericho'],
+    #         'HKEL': ['Uasin Gishu', 'Trans Nzoia', 'Nandi'],
+    #     }
+    #     return airport_counties.get(airport.icao_code, ['Nairobi County'])
+    
+    # def _get_runway_info(self, airport):
+    #     """Get runway information (placeholder)"""
+    #     # This would come from a Runway model in the future
+    #     runways = {
+    #         'HKJK': ['06/24 (4,117m)', '15/33 (4,267m)'],
+    #         'HKNW': ['07/25 (1,459m)', '14/32 (1,126m)'],
+    #         'HKMO': ['03/21 (3,350m)', '15/33 (1,463m)'],
+    #     }
+    #     return runways.get(airport.icao_code, ['Runway info not available'])
+
+
+# ============================================
+# PROPERTY COMPLIANCE VIEWS
+# ============================================
+
+class PropertyComplianceView(TemplateView):
+    """
+    View for checking property compliance
+    """
+    template_name = 'obstacle_compliance/property_check.html'
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['default_height'] = 30
+        context['map_config'] = {
+            'center': [-1.2864, 36.8172],
+            'zoom': 12,
+        }
+        return context
+
+
+# obstacle_compliance/views.py - Enhanced Property Compliance API
+
+class PropertyComplianceAPI(View):
+    """
+    Enhanced API endpoint for property compliance checks using DEM service
+    """
+    
+    def get(self, request):
+        """Handle GET request with query parameters"""
+        try:
+            # Get parameters
+            lat = request.GET.get('lat')
+            lon = request.GET.get('lon')
+            height = request.GET.get('height', 30)
+            
+            if not lat or not lon:
+                return JsonResponse({
+                    'status': 'ERROR',
+                    'message': 'Latitude and longitude are required'
+                }, status=400)
+            
+            # Create point
+            try:
+                point = Point(float(lon), float(lat), srid=4326)
+                height = float(height)
+            except (ValueError, TypeError) as e:
+                return JsonResponse({
+                    'status': 'ERROR',
+                    'message': f'Invalid coordinates or height: {str(e)}'
+                }, status=400)
+            
+            # Check cache
+            cache_key = f"compliance_api_{lat}_{lon}_{height}"
+            cached_result = cache.get(cache_key)
+            if cached_result:
+                return JsonResponse(cached_result)
+            
+            # Evaluate compliance with full DEM context
+            result = self._enhanced_compliance_check(point, height)
+            
+            # Cache result
+            cache.set(cache_key, result, 300)
+            
+            return JsonResponse(result)
+            
+        except Exception as e:
+            logger.error(f"Error in PropertyComplianceAPI: {str(e)}", exc_info=True)
+            return JsonResponse({
+                'status': 'ERROR',
+                'message': f'System error: {str(e)}'
+            }, status=500)
+    
+    def _enhanced_compliance_check(self, point, height):
+        """Enhanced compliance check with full DEM context"""
+        
+        # Get base compliance result
+        base_result = calculator.evaluate_property_all_airports(point, height)
+        
+        # Get detailed DEM information
+        dem_info = self._get_dem_context(point)
+        
+        # Enhance the result with DEM context
+        enhanced_result = {
+            **base_result,
+            'dem_context': dem_info,
+            'terrain_profile': self._get_terrain_profile(point),
+            'visualization': self._generate_visualization_data(point, height, base_result)
+        }
+        
+        return enhanced_result
+    
+    def _get_dem_context(self, point):
+        """Get detailed DEM context for a point"""
+        
+        # Get elevation with multiple samples for confidence
+        elevations = []
+        offsets = [(0,0), (0.001,0), (0,0.001), (-0.001,0), (0,-0.001)]
+        
+        for lon_off, lat_off in offsets:
+            sample_point = Point(point.x + lon_off, point.y + lat_off, srid=4326)
+            try:
+                elev = calculator.dem.get_elevation(sample_point)
+                if elev and elev > -500 and elev < 10000:  # Valid range
+                    elevations.append(elev)
+            except:
+                continue
+        
+        if not elevations:
+            return {
+                'elevation': None,
+                'confidence': 0,
+                'source': 'No valid DEM data',
+                'interpolation': 'Failed'
             }
-        )
         
-        # Get gazetted areas within buffer (mock for now)
-        # In production, you'd query actual data
-        gazetted_areas = [
-            "Nairobi West", "Madaraka", "South B", "South C", "Lang'ata",
-            "Karen", "Ongata Rongai", "Kibera", "Highrise"
-        ][:5]  # Limit for demo
+        # Calculate statistics
+        mean_elev = sum(elevations) / len(elevations)
+        std_dev = (sum((e - mean_elev) ** 2 for e in elevations) / len(elevations)) ** 0.5
         
-        response = {
-            'success': True,
-            'airport': {
-                'id': airport.id,
-                'name': airport.name,
-                'code': airport.iata or airport.icao,
-                'latitude': airport.latitude,
-                'longitude': airport.longitude,
-                'elevation': airport.elevation_field
+        # Determine confidence based on variance
+        if std_dev < 1:
+            confidence = 95  # High confidence
+            quality = 'Excellent'
+        elif std_dev < 3:
+            confidence = 85  # Good confidence
+            quality = 'Good'
+        elif std_dev < 10:
+            confidence = 70  # Moderate confidence
+            quality = 'Fair'
+        else:
+            confidence = 50  # Low confidence
+            quality = 'Poor - High terrain variability'
+        
+        return {
+            'elevation': round(mean_elev, 1),
+            'samples_taken': len(elevations),
+            'std_deviation': round(std_dev, 2),
+            'confidence': confidence,
+            'quality': quality,
+            'source': 'SRTM 30m DEM',
+            'interpolation': 'Bilinear' if len(elevations) > 1 else 'Nearest neighbor',
+            'timestamp': datetime.now().isoformat()
+        }
+    
+    def _get_terrain_profile(self, point, distance=5000, directions=8):
+        """
+        Get terrain profile in multiple directions
+        Useful for visualizing approach paths
+        """
+        profiles = []
+        
+        # Sample in multiple directions
+        for angle in range(0, 360, 45):  # 8 directions
+            import math
+            rad = math.radians(angle)
+            profile = []
+            
+            for dist in range(0, distance + 1, 100):  # Sample every 100m
+                dx = dist * math.sin(rad) / 111000  # Approximate degree to meters
+                dy = dist * math.cos(rad) / 111000
+                
+                sample_point = Point(point.x + dx, point.y + dy, srid=4326)
+                elev = calculator.dem.get_elevation(sample_point)
+                
+                profile.append({
+                    'distance': dist,
+                    'elevation': elev,
+                    'point': [sample_point.y, sample_point.x]
+                })
+            
+            profiles.append({
+                'direction': angle,
+                'bearing': self._bearing_to_cardinal(angle),
+                'profile': profile
+            })
+        
+        return profiles
+    
+    def _bearing_to_cardinal(self, bearing):
+        """Convert bearing to cardinal direction"""
+        directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+        index = round(bearing / 45) % 8
+        return directions[index]
+    
+    def _generate_visualization_data(self, point, height, result):
+        """Generate data for 3D visualization"""
+        
+        viz_data = {
+            'point': [point.y, point.x],
+            'ground_elevation': result.get('primary_result', {}).get('ground_elevation'),
+            'building_top': result.get('primary_result', {}).get('building_top_amsl'),
+            'affected_airports': []
+        }
+        
+        # For each affected airport, generate OLS surface points
+        for airport in result.get('airports_affected', []):
+            # Get airport geometry
+            try:
+                airport_obj = Aerodrome.objects.get(icao_code=airport['icao'])
+                
+                # Generate OLS profile from airport to property
+                profile = self._generate_ols_profile(
+                    airport_obj.geom, 
+                    point, 
+                    airport_obj.elevation_m
+                )
+                
+                viz_data['affected_airports'].append({
+                    'icao': airport['icao'],
+                    'name': airport['name'],
+                    'profile': profile
+                })
+            except Aerodrome.DoesNotExist:
+                continue
+        
+        return viz_data
+    
+    def _generate_ols_profile(self, airport_point, property_point, airport_elev):
+        """Generate OLS surface profile between airport and property"""
+        
+        # Calculate distance and bearing
+        from geopy.distance import geodesic
+        airport_coords = (airport_point.y, airport_point.x)
+        property_coords = (property_point.y, property_point.x)
+        
+        total_distance = geodesic(airport_coords, property_coords).meters
+        
+        # Generate profile points
+        profile = []
+        for dist in range(0, int(total_distance) + 1, 100):
+            # Calculate OLS ceiling at this distance
+            ols_ceiling = calculator.calculate_ols_ceiling(airport_elev, dist)
+            
+            # Calculate point along line (simplified - would need proper interpolation)
+            ratio = dist / total_distance
+            lat = airport_point.y + (property_point.y - airport_point.y) * ratio
+            lon = airport_point.x + (property_point.x - airport_point.x) * ratio
+            
+            # Get ground elevation at this point
+            sample_point = Point(lon, lat, srid=4326)
+            ground_elev = calculator.dem.get_elevation(sample_point)
+            
+            profile.append({
+                'distance': dist,
+                'ols_ceiling': ols_ceiling,
+                'ground_elevation': ground_elev,
+                'clearance': ols_ceiling - ground_elev if ols_ceiling else None,
+                'point': [lat, lon]
+            })
+        
+        return profile
+
+class BatchComplianceView(View):
+    """
+    View for batch compliance checking (multiple properties)
+    """
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+            properties = data.get('properties', [])
+            
+            if not properties:
+                return JsonResponse({
+                    'status': 'ERROR',
+                    'message': 'No properties provided'
+                }, status=400)
+            
+            results = []
+            for prop in properties[:100]:  # Limit to 100 properties
+                try:
+                    point = Point(float(prop['lon']), float(prop['lat']), srid=4326)
+                    height = float(prop.get('height', 30))
+                    
+                    result = calculator.evaluate_property_all_airports(point, height)
+                    result['id'] = prop.get('id', str(hash(f"{prop['lat']}{prop['lon']}")))
+                    results.append(result)
+                    
+                except Exception as e:
+                    results.append({
+                        'id': prop.get('id', 'unknown'),
+                        'status': 'ERROR',
+                        'message': str(e)
+                    })
+            
+            return JsonResponse({
+                'status': 'SUCCESS',
+                'count': len(results),
+                'results': results
+            })
+            
+        except Exception as e:
+            logger.error(f"Error in BatchComplianceView: {str(e)}", exc_info=True)
+            return JsonResponse({
+                'status': 'ERROR',
+                'message': str(e)
+            }, status=500)
+
+
+# ============================================
+# MAP AND VISUALIZATION VIEWS
+# ============================================
+
+# obstacle_compliance/views.py - Update MapView class
+
+# obstacle_compliance/views.py - Updated MapView class
+
+class MapView(TemplateView):
+    """
+    Interactive map view with full capabilities:
+    - Buffer visualization (3km, 5km, 10km, 15km)
+    - Airport locations with details
+    - Property compliance checking
+    - Elevation data from DEM
+    - Drawing tools for custom areas
+    """
+    template_name = 'obstacle_compliance/map_view.html'
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        
+        # Get active airport if specified
+        icao = self.request.GET.get('airport')
+        active_airport = None
+        map_center = [-1.2864, 36.8172]  # Default: Nairobi
+        map_zoom = 7
+        
+        if icao:
+            try:
+                active_airport = Aerodrome.objects.get(icao_code=icao.upper())
+                map_center = [active_airport.geom.y, active_airport.geom.x]
+                map_zoom = 12
+                context['active_airport'] = active_airport
+            except Aerodrome.DoesNotExist:
+                logger.warning(f"Airport with ICAO code {icao} not found")
+        
+        # Get coordinates from query params (for property check)
+        lat = self.request.GET.get('lat')
+        lon = self.request.GET.get('lon')
+        if lat and lon:
+            try:
+                context['initial_lat'] = float(lat)
+                context['initial_lon'] = float(lon)
+                map_center = [float(lat), float(lon)]
+                map_zoom = 15
+            except ValueError:
+                pass
+        
+        context['map_config'] = {
+            'center': map_center,
+            'zoom': map_zoom,
+            'max_zoom': 18,
+            'min_zoom': 6,
+            'default_radius': int(self.request.GET.get('radius', 15)),
+        }
+        
+        # Get all airports for the airports list sidebar
+        context['airports'] = Aerodrome.objects.all().order_by('name')[:50]
+        context['total_airports'] = Aerodrome.objects.count()
+        
+        # Buffer statistics
+        context['buffer_stats'] = {
+            '3km': AerodromeBuffer.objects.filter(radius_km=3).count(),
+            '5km': AerodromeBuffer.objects.filter(radius_km=5).count(),
+            '10km': AerodromeBuffer.objects.filter(radius_km=10).count(),
+            '15km': AerodromeBuffer.objects.filter(radius_km=15).count(),
+        }
+        
+        # Available basemaps
+        context['basemaps'] = [
+            {
+                'id': 'carto-light',
+                'name': 'Carto Light',
+                'url': 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                'attribution': '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; CartoDB',
+                'thumbnail': '/static/obstacle_compliance/images/basemaps/carto-light.jpg'
             },
-            'buffer': {
+            {
+                'id': 'satellite',
+                'name': 'Satellite',
+                'url': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                'attribution': '&copy; <a href="https://www.esri.com/">Esri</a>',
+                'thumbnail': '/static/obstacle_compliance/images/basemaps/satellite.jpg'
+            },
+            {
+                'id': 'terrain',
+                'name': 'Terrain',
+                'url': 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                'attribution': '&copy; <a href="https://opentopomap.org/">OpenTopoMap</a>',
+                'thumbnail': '/static/obstacle_compliance/images/basemaps/terrain.jpg'
+            },
+            {
+                'id': 'osm',
+                'name': 'OpenStreetMap',
+                'url': 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                'attribution': '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                'thumbnail': '/static/obstacle_compliance/images/basemaps/osm.jpg'
+            }
+        ]
+        
+        return context
+
+
+from django.contrib.gis.db.models.functions import Transform
+# from django.contrib.gis.db.models.functions import Buffer as GISBuffer
+
+from django.contrib.gis.db.models.functions import GeoFunc
+
+GISBuffer = GeoFunc
+
+# Or try:
+# from django.contrib.gis.db.models.functions import Transform
+# from django.contrib.gis.db.models.functions import GeomFunc
+# from .models import Aerodrome, AerodromeBuffer
+import json
+
+class BufferGeoJSONView(View):
+    @method_decorator(cache_page(60 * 15))
+    def get(self, request):
+        try:
+            radius_str = request.GET.get('radius', '15')
+            radius = int(float(radius_str))  # supports 7 or 7.5 (floors safely)
+            if radius < 1:
+                radius = 1
+            if radius > 100:
+                radius = 100
+
+            icao = request.GET.get('icao')
+
+            # === ENSURE BUFFERS EXIST (only creates missing ones, once ever) ===
+            if icao:
+                try:
+                    ad = Aerodrome.objects.get(icao_code=icao.upper())
+                    ad.get_or_create_buffer(radius)
+                except Aerodrome.DoesNotExist:
+                    pass
+            else:
+                # Bulk-create only what's missing (extremely fast after first time)
+                missing = Aerodrome.objects.exclude(buffers__radius_km=radius)
+                for ad in missing:
+                    ad.get_or_create_buffer(radius)
+
+            # === NOW JUST QUERY THE DB (always fast) ===
+            buffers_qs = AerodromeBuffer.objects.filter(
+                radius_km=radius
+            ).select_related('aerodrome')
+
+            if icao:
+                buffers_qs = buffers_qs.filter(aerodrome__icao_code=icao.upper())
+
+            features = []
+            for buf in buffers_qs[:100]:
+                features.append(self._format_feature(
+                    buf.geom.geojson,
+                    buf.aerodrome,
+                    buf.radius_km,
+                    buf.area_km2,
+                    buf.id
+                ))
+
+            return JsonResponse({
+                'type': 'FeatureCollection',
+                'features': features,
+                'metadata': {
+                    'count': len(features),
+                    'radius': radius,
+                    'icao_filter': icao
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"BufferGeoJSONView error: {str(e)}", exc_info=True)
+            return JsonResponse({'error': str(e)}, status=500)
+
+    def _format_feature(self, geom_json, aerodrome, radius, area, feature_id):
+        """Unchanged - exactly as you had it"""
+        color = self._get_color_for_radius(radius)
+        return {
+            'type': 'Feature',
+            'geometry': json.loads(geom_json),
+            'properties': {
+                'id': feature_id,
+                'airport_icao': aerodrome.icao_code,
+                'airport_name': aerodrome.name or aerodrome.admin_company,
                 'radius_km': radius,
-                'area_sqkm': round(buffer.area_sqkm, 2),
-                'geometry': json.loads(buffer.geometry.geojson)
-            },
-            'stats': {
-                'area_sqkm': round(buffer.area_sqkm, 2),
-                'estimated_properties': radius * 15000,  # Mock calculation
-                'estimated_population': radius * 75000,  # Mock calculation
-                'gazetted_areas_count': len(gazetted_areas),
-                'gazetted_areas': gazetted_areas
+                'area_km2': round(area, 2) if area else None,
+                'stroke': color,
+                'fill': color,
+                'fill-opacity': 0.15,
             }
         }
-        
-        return JsonResponse(response)
-        
-    except Airports.DoesNotExist:
-        return JsonResponse({'success': False, 'error': 'Airport not found'}, status=404)
 
-@require_GET
-def check_property(request):
-    """Check property compliance"""
-    lat = request.GET.get('lat')
-    lon = request.GET.get('lon')
-    address = request.GET.get('address')
-    height = request.GET.get('height', 0)
+    def _get_color_for_radius(self, radius):
+        colors = {3: '#FF6B6B', 5: '#FFA500', 10: '#2196F3', 15: '#4CAF50'}
+        return colors.get(radius, '#9C27B0')  # purple for any custom radius
+
+# obstacle_compliance/views.py - Update AirportGeoJSONView
+
+class AirportGeoJSONView(View):
+    """
+    Return airport points as GeoJSON for mapping with enhanced properties
+    """
+    @method_decorator(cache_page(60 * 30))  # Cache for 30 minutes
+    def get(self, request):
+        try:
+            # Get optional filter
+            icao = request.GET.get('icao')
+            
+            airports = Aerodrome.objects.all()
+            if icao:
+                airports = airports.filter(icao_code=icao.upper())
+            
+            features = []
+            for airport in airports:
+                try:
+                    if not airport.geom:
+                        continue
+                        
+                    geom_json = json.loads(airport.geom.geojson)
+                    
+                    # Parse elevation display
+                    if airport.elevation_m:
+                        elevation_display = f"{airport.elevation_m:.0f}m"
+                    elif airport.elevation_m_ft:
+                        elevation_display = airport.elevation_m_ft
+                    else:
+                        elevation_display = "N/A"
+                    
+                    feature = {
+                        'type': 'Feature',
+                        'geometry': geom_json,
+                        'properties': {
+                            'id': airport.fid,
+                            'icao': airport.icao_code,
+                            'name': airport.name or airport.admin_company or airport.icao_code,
+                            'type': airport.type or 'Unknown',
+                            'elevation': airport.elevation_m,
+                            'elevation_display': elevation_display,
+                            'admin_company': airport.admin_company,
+                            'traffic_permitted': airport.traffic_permitted or 'Unknown',
+                            'has_buffer_3km': airport.buffers.filter(radius_km=3).exists(),
+                            'has_buffer_5km': airport.buffers.filter(radius_km=5).exists(),
+                            'has_buffer_10km': airport.buffers.filter(radius_km=10).exists(),
+                            'has_buffer_15km': airport.buffers.filter(radius_km=15).exists(),
+                            'marker_color': self._get_marker_color(airport.type),
+                            'marker_size': 'medium',
+                            'marker_symbol': 'airport',
+                        }
+                    }
+                    features.append(feature)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing airport {airport.icao_code}: {e}")
+                    continue
+            
+            geojson = {
+                'type': 'FeatureCollection',
+                'features': features,
+                'metadata': {
+                    'count': len(features),
+                    'icao_filter': icao
+                }
+            }
+            
+            return JsonResponse(geojson)
+            
+        except Exception as e:
+            logger.error(f"Error in AirportGeoJSONView: {str(e)}", exc_info=True)
+            return JsonResponse({
+                'type': 'FeatureCollection',
+                'features': []
+            })
     
+    def _get_marker_color(self, airport_type):
+        """Get marker color based on airport type"""
+        airport_type = (airport_type or '').lower()
+        
+        if 'international' in airport_type:
+            return '#dc3545'  # Red for international
+        elif 'domestic' in airport_type or 'national' in airport_type:
+            return '#0d6efd'  # Blue for domestic
+        elif 'military' in airport_type or 'air force' in airport_type:
+            return '#198754'  # Green for military
+        elif 'airstrip' in airport_type or 'private' in airport_type:
+            return '#ffc107'  # Yellow for small airstrips
+        else:
+            return '#6c757d'  # Gray for unknown# ============================================
+# SEARCH AND AUTOCOMPLETE VIEWS
+# ============================================
+
+class SearchView(View):
+    """
+    Search for airports, locations, or properties
+    """
+    def get(self, request):
+        query = request.GET.get('q', '')
+        search_type = request.GET.get('type', 'all')
+        
+        if len(query) < 2:
+            return JsonResponse({'results': []})
+        
+        results = []
+        
+        # Search airports
+        if search_type in ['all', 'airports']:
+            airports = Aerodrome.objects.filter(
+                Q(name__icontains=query) |
+                Q(icao_code__icontains=query) |
+                Q(admin_company__icontains=query)
+            )[:10]
+            
+            for airport in airports:
+                results.append({
+                    'id': f"airport_{airport.icao_code}",
+                    'type': 'airport',
+                    'text': f"{airport.name or airport.admin_company} ({airport.icao_code})",
+                    'url': reverse('obstacle_compliance:airport_detail', args=[airport.icao_code]),
+                    'coordinates': [airport.geom.y, airport.geom.x]
+                })
+        
+        # TODO: Add location search using geocoding service
+        
+        return JsonResponse({'results': results})
+
+
+class GeocodeView(View):
+    """
+    Geocode an address to coordinates (placeholder - integrate with real geocoder)
+    """
+    def get(self, request):
+        address = request.GET.get('address', '')
+        
+        if not address:
+            return JsonResponse({'error': 'Address required'}, status=400)
+        
+        # Placeholder - in production, use Google Maps API, Mapbox, or OpenStreetMap
+        # For now, return Nairobi center for any address
+        return JsonResponse({
+            'lat': -1.2864,
+            'lon': 36.8172,
+            'display_name': f"Nairobi, Kenya ({address})",
+            'place_id': 'placeholder'
+        })
+
+
+# ============================================
+# REPORT AND EXPORT VIEWS
+# ============================================
+
+class ComplianceReportView(View):
+    """
+    Generate a professional PDF report for a property compliance check
+    """
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+            lat = data.get('lat')
+            lon = data.get('lon')
+            height = data.get('height', 30)
+
+            if not lat or not lon:
+                return JsonResponse({'error': 'Coordinates required'}, status=400)
+
+            # 1. Calculate Compliance Data
+            point = Point(float(lon), float(lat), srid=4326)
+            result = calculator.evaluate_property_all_airports(point, float(height))
+
+            # 2. Prepare Template Context
+            context = {
+                'generated_at': datetime.now(),
+                'property': {
+                    'latitude': lat,
+                    'longitude': lon,
+                    'height': height,
+                },
+                'compliance': result,
+                'status_color': '#dc3545' if result['status'] == 'HAZARD' else '#28a745',
+                'disclaimer': 'This report is generated for informational purposes only. '
+                              'Official approval must be obtained from KCAA before construction.'
+            }
+
+            # 3. Render HTML to String
+            html_string = render_to_string('obstacle_compliance/pdf_report_template.html', context) # the html file is to be created in the templates/obstacle_compliance/ directory with appropriate styling for PDF output
+            
+            # 4. Create PDF
+            result_file = io.BytesIO()
+            pisa_status = pisa.CreatePDF(io.BytesIO(html_string.encode("UTF-8")), dest=result_file)
+
+            if pisa_status.err:
+                return JsonResponse({'error': 'PDF generation failed'}, status=500)
+
+            # 5. Return PDF as Downloadable Response
+            result_file.seek(0)
+            response = HttpResponse(result_file, content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="KCAA_Compliance_{lat}_{lon}.pdf"'
+            return response
+
+        except Exception as e:
+            logger.error(f"Error generating report: {str(e)}", exc_info=True)
+            return JsonResponse({'error': str(e)}, status=500)
+
+
+# ============================================
+# STATISTICS AND ANALYTICS VIEWS
+# ============================================
+
+class StatisticsView(View):
+    """
+    Get system statistics and analytics
+    """
+    @method_decorator(cache_page(60 * 30))  # Cache for 30 minutes
+    def get(self, request):
+        try:
+            stats = {
+                'airports': {
+                    'total': Aerodrome.objects.count(),
+                    'by_type': dict(Aerodrome.objects.values_list('type').annotate(count=Count('type'))),
+                },
+                'buffers': {
+                    'total': AerodromeBuffer.objects.count(),
+                    'by_radius': dict(AerodromeBuffer.objects.values_list('radius_km').annotate(count=Count('id'))),
+                },
+                'coverage': {
+                    'total_area_km2': round(sum(AerodromeBuffer.objects.filter(
+                        radius_km=15
+                    ).values_list('area_km2', flat=True)), 2),
+                }
+            }
+            
+            return JsonResponse(stats)
+            
+        except Exception as e:
+            logger.error(f"Error getting statistics: {str(e)}", exc_info=True)
+            return JsonResponse({'error': str(e)}, status=500)
+
+
+# ============================================
+# ERROR HANDLING VIEWS
+# ============================================
+
+def handler404(request, exception):
+    """Custom 404 handler"""
+    return render(request, 'obstacle_compliance/404.html', status=404)
+
+
+def handler500(request):
+    """Custom 500 handler"""
+    return render(request, 'obstacle_compliance/500.html', status=500)
+
+
+# Add this temporarily for debugging
+from django.http import HttpResponse
+
+def debug_geojson(request):
+    """Debug endpoint to check GeoJSON data"""
     try:
-        lat = float(lat)
-        lon = float(lon)
-        height = float(height)
+        airports_count = Aerodrome.objects.count()
+        buffers_count = AerodromeBuffer.objects.count()
         
-        point = Point(lon, lat, srid=4326)
+        sample_airport = Aerodrome.objects.first()
+        sample_buffer = AerodromeBuffer.objects.first()
         
-        # Find nearest airport
-        nearest = Airports.objects.annotate(
-            distance=Distance('geom', point)
-        ).order_by('distance').first()
-        
-        if not nearest:
-            return JsonResponse({'success': False, 'error': 'No airports found'})
-        
-        distance_km = nearest.distance.km
-        distance_m = distance_km * 1000
-        
-        # Calculate max allowed height
-        max_height = calculate_max_allowed_height(
-            nearest.elevation_field or 0,
-            distance_m,
-            nearest
-        )
-        
-        # Determine compliance
-        height_compliant = height <= max_height
-        lights_required = height > 30 and distance_m <= 15000
-        
-        # Find if property exists or create mock
-        property_data = {
-            'address': address or f"Point at {lat:.4f}, {lon:.4f}",
-            'coordinates': {'lat': lat, 'lon': lon}
-        }
-        
-        response = {
-            'success': True,
-            'property': property_data,
-            'nearest_airport': {
-                'id': nearest.id,
-                'name': nearest.name,
-                'code': nearest.iata or nearest.icao,
-                'distance_km': round(distance_km, 2),
-                'elevation': nearest.elevation_field
-            },
-            'compliance': {
-                'max_allowed_height_m': round(max_height, 1),
-                'current_height_m': height,
-                'height_compliant': height_compliant,
-                'lights_required': lights_required,
-                'status': 'compliant' if (height_compliant and not lights_required) else 'non_compliant',
-                'message': self._get_compliance_message(height_compliant, lights_required)
-            }
-        }
-        
-        return JsonResponse(response)
-        
-    except (ValueError, TypeError):
-        return JsonResponse({'success': False, 'error': 'Invalid parameters'}, status=400)
-
-def _get_compliance_message(height_compliant, lights_required):
-    if height_compliant and not lights_required:
-        return "✅ Property complies with all regulations"
-    elif not height_compliant and lights_required:
-        return "❌ Height violation AND obstacle lights required"
-    elif not height_compliant:
-        return "❌ Height exceeds maximum allowed"
-    elif lights_required:
-        return "⚠️ Obstacle lights required"
-    return "Compliance status unknown"
-
-@require_GET
-def search_properties(request):
-    """Search properties by address or coordinates"""
-    query = request.GET.get('q', '')
-    
-    # Mock response for now - in production, query actual property database
-    mock_results = [
-        {
-            'id': 1,
-            'address': 'Nairobi West, Next to St Mary\'s School',
-            'coordinates': {'lat': -1.3105, 'lon': 36.8152},
-            'type': 'residential'
-        },
-        {
-            'id': 2,
-            'address': 'Karen, Lang\'ata Road',
-            'coordinates': {'lat': -1.3196, 'lon': 36.7082},
-            'type': 'commercial'
-        },
-        {
-            'id': 3,
-            'address': 'South B, Opposite Shell',
-            'coordinates': {'lat': -1.3056, 'lon': 36.8250},
-            'type': 'residential'
-        }
-    ]
-    
-    # Filter based on query
-    if query:
-        mock_results = [r for r in mock_results if query.lower() in r['address'].lower()]
-    
-    return JsonResponse({'results': mock_results[:10]})
-
-def airport_detail(request, airport_id):
-    """Detailed view for a single airport"""
-    airport = get_object_or_404(Airports, id=airport_id)
-    
-    context = {
-        'airport': airport,
-        'default_radius': 15,
-        'radii_presets': [3, 5, 8, 10, 15, 20, 30, 50],
-        'gazetted_areas': [
-            "Nairobi West", "Madaraka", "South B", "South C", 
-            "Lang'ata", "Karen", "Ongata Rongai"
-        ]  # Mock data
-    }
-    
-    return render(request, 'obstacle_compliance/airport_detail.html', context)
+        return HttpResponse(f"""
+            <h1>GeoJSON Debug Info</h1>
+            <ul>
+                <li>Airports: {airports_count}</li>
+                <li>Buffers: {buffers_count}</li>
+                <li>Sample Airport: {sample_airport.icao_code if sample_airport else 'None'}</li>
+                <li>Sample Buffer: {sample_buffer.id if sample_buffer else 'None'}</li>
+            </ul>
+            <h2>Test Links:</h2>
+            <ul>
+                <li><a href="/obstacle-compliance/api/airports.geojson">Airports GeoJSON</a></li>
+                <li><a href="/obstacle-compliance/api/buffers.geojson?radius=15">Buffers GeoJSON (15km)</a></li>
+            </ul>
+        """)
+    except Exception as e:
+        return HttpResponse(f"Error: {str(e)}")

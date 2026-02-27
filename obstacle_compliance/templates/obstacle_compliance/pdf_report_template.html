@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>KCAA Obstacle Compliance Report</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm;
+            @frame footer {
+                -pdf-frame-content: footerContent;
+                bottom: 0cm;
+                margin-left: 2cm;
+                margin-right: 2cm;
+                height: 1cm;
+            }
+        }
+        
+        body {
+            font-family: Helvetica, Arial, sans-serif;
+            font-size: 12pt;
+            line-height: 1.5;
+            color: #333;
+        }
+        
+        h1 {
+            color: #0d6efd;
+            font-size: 24pt;
+            margin-bottom: 0.5cm;
+            border-bottom: 2px solid #0d6efd;
+            padding-bottom: 0.3cm;
+        }
+        
+        h2 {
+            color: #495057;
+            font-size: 18pt;
+            margin-top: 0.8cm;
+            margin-bottom: 0.4cm;
+        }
+        
+        h3 {
+            color: #6c757d;
+            font-size: 14pt;
+            margin-top: 0.5cm;
+            margin-bottom: 0.3cm;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 1cm;
+        }
+        
+        .header img {
+            max-height: 1.5cm;
+            margin-bottom: 0.3cm;
+        }
+        
+        .header h1 {
+            border-bottom: none;
+            margin-bottom: 0.2cm;
+        }
+        
+        .header p {
+            color: #6c757d;
+            font-size: 10pt;
+        }
+        
+        .status-banner {
+            padding: 0.5cm;
+            margin: 0.5cm 0;
+            border-radius: 0.3cm;
+            color: white;
+            text-align: center;
+        }
+        
+        .status-banner h2 {
+            color: white;
+            margin: 0;
+            font-size: 20pt;
+        }
+        
+        .status-banner p {
+            margin: 0.2cm 0 0;
+            font-size: 12pt;
+            opacity: 0.9;
+        }
+        
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0.5cm 0;
+        }
+        
+        .info-table td {
+            padding: 0.3cm;
+            border: 1px solid #dee2e6;
+        }
+        
+        .info-table .label {
+            font-weight: bold;
+            background-color: #f8f9fa;
+            width: 40%;
+        }
+        
+        .info-table .value {
+            width: 60%;
+        }
+        
+        .score-box {
+            text-align: center;
+            padding: 0.5cm;
+            background-color: #f8f9fa;
+            border-radius: 0.3cm;
+            margin: 0.5cm 0;
+        }
+        
+        .score-box .score {
+            font-size: 36pt;
+            font-weight: bold;
+            color: #0d6efd;
+            line-height: 1.2;
+        }
+        
+        .score-box .score-label {
+            font-size: 12pt;
+            color: #6c757d;
+        }
+        
+        .airport-list {
+            margin: 0.5cm 0;
+        }
+        
+        .airport-item {
+            padding: 0.3cm;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .airport-item:last-child {
+            border-bottom: none;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 0.1cm 0.3cm;
+            border-radius: 0.2cm;
+            font-size: 10pt;
+            font-weight: bold;
+        }
+        
+        .badge-success {
+            background-color: #28a745;
+            color: white;
+        }
+        
+        .badge-warning {
+            background-color: #ffc107;
+            color: #333;
+        }
+        
+        .badge-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        .badge-info {
+            background-color: #17a2b8;
+            color: white;
+        }
+        
+        .footer {
+            text-align: center;
+            font-size: 9pt;
+            color: #6c757d;
+            margin-top: 1cm;
+            padding-top: 0.5cm;
+            border-top: 1px solid #dee2e6;
+        }
+        
+        .disclaimer {
+            font-size: 9pt;
+            color: #6c757d;
+            font-style: italic;
+            margin-top: 0.5cm;
+            padding: 0.3cm;
+            background-color: #f8f9fa;
+            border-left: 3px solid #ffc107;
+        }
+        
+        .metric-box {
+            display: inline-block;
+            width: 30%;
+            margin: 0 1.5%;
+            padding: 0.3cm;
+            background-color: #f8f9fa;
+            border-radius: 0.2cm;
+            text-align: center;
+            vertical-align: top;
+        }
+        
+        .metric-box .metric-value {
+            font-size: 18pt;
+            font-weight: bold;
+            color: #0d6efd;
+        }
+        
+        .metric-box .metric-label {
+            font-size: 9pt;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div id="footerContent">
+        <div class="footer">
+            Generated on {{ generated_at|date:"F j, Y H:i:s" }} | KCAA Obstacle Compliance System v2.0
+        </div>
+    </div>
+
+    <!-- Header -->
+    <div class="header">
+        <h1>KENYA CIVIL AVIATION AUTHORITY</h1>
+        <p>Obstacle Limitation Surfaces Compliance Report</p>
+    </div>
+
+    <!-- Status Banner -->
+    <div class="status-banner" style="background-color: {{ status_color }};">
+        <h2>
+            {% if compliance.status == 'GREEN' %}
+                ✓ COMPLIANT
+            {% elif compliance.status == 'YELLOW' %}
+                ⚠ CAUTION - WITHIN REGULATORY ZONE
+            {% elif compliance.status == 'RED' or compliance.status == 'HAZARD' %}
+                ✗ HAZARD DETECTED
+            {% else %}
+                ℹ INFORMATION
+            {% endif %}
+        </h2>
+        <p>{{ compliance.message }}</p>
+    </div>
+
+    <!-- Property Information -->
+    <h2>Property Information</h2>
+    <table class="info-table">
+        <tr>
+            <td class="label">Coordinates</td>
+            <td class="value">{{ property.latitude }}, {{ property.longitude }}</td>
+        </tr>
+        <tr>
+            <td class="label">Building Height (AGL)</td>
+            <td class="value">{{ property.height }} meters</td>
+        </tr>
+        <tr>
+            <td class="label">Ground Elevation</td>
+            <td class="value">{{ compliance.primary_result.ground_elevation|default:'N/A' }} meters AMSL</td>
+        </tr>
+        <tr>
+            <td class="label">Building Top (AMSL)</td>
+            <td class="value">{{ compliance.primary_result.building_top_amsl|default:'N/A' }} meters</td>
+        </tr>
+    </table>
+
+    <!-- Compliance Score -->
+    {% if compliance.compliance_score %}
+    <div class="score-box">
+        <div class="score">{{ compliance.compliance_score }}</div>
+        <div class="score-label">Compliance Score /100</div>
+    </div>
+    {% endif %}
+
+    <!-- Primary Airport Analysis -->
+    {% if primary_airport and primary_result %}
+    <h2>Primary Airport Analysis</h2>
+    <table class="info-table">
+        <tr>
+            <td class="label">Airport</td>
+            <td class="value">{{ primary_airport.name }} ({{ primary_airport.icao }})</td>
+        </tr>
+        <tr>
+            <td class="label">Distance</td>
+            <td class="value">{{ primary_result.distance_km }} km</td>
+        </tr>
+        <tr>
+            <td class="label">Maximum Allowed Height</td>
+            <td class="value">{{ primary_result.max_allowed_agl }} meters AGL</td>
+        </tr>
+        <tr>
+            <td class="label">Headroom</td>
+            <td class="value">{{ primary_result.headroom }} meters</td>
+        </tr>
+        <tr>
+            <td class="label">Obstacle Lighting Required</td>
+            <td class="value">
+                <span class="badge {% if compliance.requires_lighting %}badge-warning{% else %}badge-success{% endif %}">
+                    {% if compliance.requires_lighting %}YES - Class B Medium Intensity{% else %}NO{% endif %}
+                </span>
+            </td>
+        </tr>
+    </table>
+    {% endif %}
+
+    <!-- Affected Airports -->
+    <h2>Affected Airports</h2>
+    {% if compliance.airports_affected %}
+        <div class="airport-list">
+            {% for airport in compliance.airports_affected %}
+            <div class="airport-item">
+                <strong>{{ airport.name }}</strong> ({{ airport.icao }})<br>
+                Distance: {{ airport.distance_km }} km | 
+                Status: 
+                <span class="badge 
+                    {% if airport.status == 'GREEN' %}badge-success
+                    {% elif airport.status == 'YELLOW' %}badge-warning
+                    {% elif airport.status == 'RED' %}badge-danger
+                    {% else %}badge-info{% endif %}">
+                    {{ airport.status }}
+                </span>
+                {% if airport.requires_lighting %} | <span class="badge badge-warning">Lighting Required</span>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p>No airports within 15km regulatory zone.</p>
+    {% endif %}
+
+    <!-- Zone Information -->
+    {% if compliance.zones %}
+    <h2>Zones</h2>
+    <ul>
+        {% for zone in compliance.zones %}
+        <li>{{ zone }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    <!-- Obstacle Lighting Requirements -->
+    {% if compliance.requires_lighting %}
+    <h2>Obstacle Lighting Requirements</h2>
+    <table class="info-table">
+        <tr>
+            <td class="label">Requirement</td>
+            <td class="value">Class B Medium-Intensity Obstruction Light</td>
+        </tr>
+        <tr>
+            <td class="label">Specification</td>
+            <td class="value">2,000 candelas, flashing white or red</td>
+        </tr>
+        <tr>
+            <td class="label">Reference</td>
+            <td class="value">KCAA Circular CAA-AC-AGA032A</td>
+        </tr>
+    </table>
+    {% endif %}
+
+    <!-- Recommendation -->
+    <h2>Recommendation</h2>
+    <table class="info-table">
+        <tr>
+            <td class="label">Action Required</td>
+            <td class="value">
+                {% if compliance.status == 'GREEN' %}
+                    No action required. Property complies with all obstacle limitation surfaces.
+                {% elif compliance.status == 'YELLOW' %}
+                    Notification to KCAA recommended. Property is within regulatory zone.
+                {% elif compliance.status == 'RED' or compliance.status == 'HAZARD' %}
+                    URGENT: This structure exceeds height limits. Contact KCAA immediately.
+                {% else %}
+                    Further assessment recommended.
+                {% endif %}
+            </td>
+        </tr>
+        <tr>
+            <td class="label">Permit Required</td>
+            <td class="value">
+                {% if compliance.status == 'GREEN' %}
+                    <span class="badge badge-success">NO</span>
+                {% else %}
+                    <span class="badge badge-warning">YES - Obstacle Permit Required</span>
+                {% endif %}
+            </td>
+        </tr>
+    </table>
+
+    <!-- Disclaimer -->
+    <div class="disclaimer">
+        <strong>DISCLAIMER:</strong> {{ disclaimer }}
+    </div>
+</body>
+</html>

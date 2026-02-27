@@ -1,176 +1,234 @@
 # obstacle_compliance/models.py
-from django.contrib.gis.db import models as gis_models
-from django.db import models
-from django.contrib.postgres.fields import JSONField  # Django 3.1+
-from airports_strips.models import Airports  # Import from existing app
+from django.contrib.gis.db import models
+from django.core.validators import MinValueValidator, MaxValueValidator
+import uuid
+from django.contrib.postgres.indexes import GistIndex  # Add this import
 
-class AerodromeBuffer(models.Model):
-    """Pre-computed buffer zones for each airport at various radii"""
-    airport = models.ForeignKey(Airports, on_delete=models.CASCADE, related_name='buffers')
-    radius_km = models.IntegerField(help_text="Buffer radius in kilometers")
-    geometry = gis_models.PolygonField(srid=4326, geography=True)
-    area_sqkm = models.FloatField(null=True, blank=True)
-    properties_count = models.IntegerField(default=0)
-    estimated_population = models.IntegerField(default=0)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
+import logging
+from django.contrib.gis.geos import MultiPolygon
+
+class Aerodrome(models.Model):
+    """Your exact model from the data - with targeted enhancements"""
+    fid = models.IntegerField(primary_key=True)
+    icao_code = models.CharField(max_length=10, unique=True)
+    name = models.CharField(max_length=100, blank=True, null=True)
+    type = models.CharField(max_length=50)
+    latitude = models.CharField(max_length=20)
+    longitude = models.CharField(max_length=20)
+    elevation_m_ft = models.CharField(max_length=30)  # This field contains mixed formats
+    elevation_m = models.FloatField(null=True, blank=True)  # NEW: Parsed elevation in meters
+    geoid_undulation_m = models.CharField(max_length=20)
+    remarks_spatial = models.TextField(blank=True, null=True)
+    admin_company = models.CharField(max_length=200, blank=True, null=True)
+    admin_address = models.TextField(blank=True, null=True)
+    admin_telephone = models.CharField(max_length=100, blank=True, null=True)
+    admin_afs = models.CharField(max_length=100, blank=True, null=True)
+    admin_email = models.CharField(max_length=100, blank=True, null=True)
+    traffic_permitted = models.CharField(max_length=50, blank=True, null=True)
+    magnetic_variation = models.CharField(max_length=30, blank=True, null=True)
+    annual_change = models.CharField(max_length=30, blank=True, null=True)
+    remarks_nonspatial = models.TextField(blank=True, null=True)
+    admin_website = models.URLField(max_length=200, blank=True, null=True)
+    geom = models.PointField(srid=4326)
+
     class Meta:
-        unique_together = ['airport', 'radius_km']
+        verbose_name = "Aerodrome"
+        verbose_name_plural = "Aerodromes"
         indexes = [
-            models.Index(fields=['airport', 'radius_km']),
-            gis_models.GiSTIndex(fields=['geometry']),
+            models.Index(fields=["icao_code"]),
+            models.Index(fields=["type"]),
         ]
-    
-    def __str__(self):
-        return f"{self.airport.name} - {self.radius_km}km buffer"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["icao_code"], name="unique_icao_code"
+            ),
+        ]
 
-class GazettedArea(models.Model):
-    """Areas mentioned in KCAA gazette notices (like Nairobi West, Karen, etc.)"""
-    name = models.CharField(max_length=100)
-    airport = models.ForeignKey(Airports, on_delete=models.CASCADE, related_name='gazetted_areas')
-    geometry = gis_models.MultiPolygonField(srid=4326, geography=True)
-    description = models.TextField(blank=True)
-    gazette_reference = models.CharField(max_length=100, blank=True)
-    publication_date = models.DateField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-    class Meta:
-        indexes = [gis_models.GiSTIndex(fields=['geometry'])]
-    
     def __str__(self):
-        return f"{self.name} (near {self.airport.name})"
+        return f"{self.icao_code} - {self.name or 'Unnamed Aerodrome'}"
 
-class Property(models.Model):
-    """Property records for compliance checking"""
-    parcel_number = models.CharField(max_length=50, unique=True, null=True, blank=True)
-    coordinates = gis_models.PointField(srid=4326, geography=True)
-    address = models.TextField()
-    area_sqm = models.FloatField(null=True, blank=True)
-    county = models.CharField(max_length=50)
-    sub_county = models.CharField(max_length=50)
-    ward = models.CharField(max_length=50)
-    town = models.CharField(max_length=100, blank=True)
-    land_use = models.CharField(max_length=50, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        indexes = [gis_models.GiSTIndex(fields=['coordinates'])]
-    
-    def __str__(self):
-        return self.address[:50]
+    def save(self, *args, **kwargs):
+        # Auto-populate elevation_m when saving
+        if self.elevation_m_ft and self.elevation_m is None:
+            self.elevation_m = self._parse_elevation()
+        super().save(*args, **kwargs)
 
-class Building(models.Model):
-    """Buildings on properties"""
-    COMPLIANCE_STATUS = [
-        ('compliant', 'Compliant'),
-        ('height_violation', 'Height Violation'),
-        ('lights_violation', 'Lights Violation'),
-        ('both_violation', 'Both Violations'),
-        ('pending', 'Pending Verification'),
-        ('exempt', 'Exempt'),
-    ]
+    def _parse_elevation(self):
+        """
+        Extract elevation in meters from the elevation_m_ft field.
+        Handles multiple formats:
+        - "6945 FT (2117 M)" → 2117
+        - "1690 / 5546" → 1690 (assuming first is meters)
+        - "13 / 42.65" → 13
+        - "231 / 756.9" → 231
+        - "18 FT (5 M)" → 5
+        - "2115 FT (645 M)" → 645
+        """
+        if not self.elevation_m_ft:
+            return None
+        
+        elev_str = str(self.elevation_m_ft).strip()
+        
+        # Pattern 1: "6945 FT (2117 M)" or "18 FT (5 M)"
+        import re
+        
+        # Try to extract meters from parentheses with "M" suffix
+        m_pattern = r'\((\d+(?:\.\d+)?)\s*M\)'
+        match = re.search(m_pattern, elev_str, re.IGNORECASE)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                pass
+        
+        # Pattern 2: "1690 / 5546" (assuming first number is meters)
+        if '/' in elev_str and 'FT' not in elev_str.upper():
+            parts = elev_str.split('/')
+            if parts:
+                try:
+                    # Clean the first part and convert to float
+                    first_part = parts[0].strip()
+                    return float(first_part)
+                except ValueError:
+                    pass
+        
+        # Pattern 3: If it's just a number (assume meters)
+        try:
+            return float(elev_str)
+        except ValueError:
+            pass
+        
+        # Pattern 4: Try to extract any number followed by M
+        m_alt_pattern = r'(\d+(?:\.\d+)?)\s*M(?!\()'
+        match = re.search(m_alt_pattern, elev_str, re.IGNORECASE)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                pass
+        
+        # Pattern 5: Extract feet and convert if necessary
+        ft_pattern = r'(\d+(?:\.\d+)?)\s*FT'
+        match = re.search(ft_pattern, elev_str, re.IGNORECASE)
+        if match:
+            try:
+                feet = float(match.group(1))
+                # Convert feet to meters (1 ft = 0.3048 m)
+                return round(feet * 0.3048, 1)
+            except ValueError:
+                pass
+        
+        # If all else fails, log warning and return None
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Could not parse elevation from: '{self.elevation_m_ft}' for airport {self.icao_code}")
+        return None
     
-    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='buildings')
-    height_m = models.FloatField(help_text="Building height in meters")
-    floor_count = models.IntegerField(null=True, blank=True)
-    construction_year = models.IntegerField(null=True, blank=True)
-    building_type = models.CharField(max_length=50, blank=True)
-    footprint = gis_models.PolygonField(srid=4326, geography=True, null=True, blank=True)
-    compliance_status = models.CharField(max_length=20, choices=COMPLIANCE_STATUS, default='pending')
-    lights_installed = models.BooleanField(default=False)
-    lights_last_verified = models.DateField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        indexes = [gis_models.GiSTIndex(fields=['footprint'])]
-    
-    def __str__(self):
-        return f"Building at {self.property.address[:30]} - {self.height_m}m"
+    # ==================== NEW METHOD ====================
+        # ==================== FIXED METHOD ====================
+    def get_or_create_buffer(self, radius_km):
+        """Create a buffer for this aerodrome if it doesn't exist yet.
+        Uses proper projection for accuracy. Now handles NOT NULL geom correctly."""
+        radius_km = int(radius_km)
+        if not self.geom:
+            logging.getLogger(__name__).warning(f"Aerodrome {self.icao_code} has no geometry")
+            return None
 
-class ComplianceCheck(models.Model):
-    """Record of compliance checks performed"""
-    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='checks')
-    airport = models.ForeignKey(Airports, on_delete=models.CASCADE)
-    distance_m = models.FloatField()
-    max_allowed_height_m = models.FloatField()
-    status = models.CharField(max_length=20, choices=Building.COMPLIANCE_STATUS)
-    checked_at = models.DateTimeField(auto_now_add=True)
-    checked_by_ip = models.GenericIPAddressField(null=True, blank=True)
-    notes = models.TextField(blank=True)
-    
-    class Meta:
-        ordering = ['-checked_at']
-    
-    def __str__(self):
-        return f"Check #{self.id} - {self.status}"
+        # === Step 1: Compute the accurate buffer geometry FIRST ===
+        try:
+            geom_3857 = self.geom.transform(3857, clone=True)
+            buffered_3857 = geom_3857.buffer(radius_km * 1000)
+            area_km2 = round(buffered_3857.area / 1_000_000, 2)
+            geom_4326 = buffered_3857.transform(4326, clone=True)
+            if geom_4326.geom_type == 'Polygon':
+                geom_4326 = MultiPolygon(geom_4326)
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Buffer geometry calculation failed for {self.icao_code}: {e}")
+            return None
 
-class PermitApplication(models.Model):
-    """Development permit applications"""
-    STATUS = [
-        ('draft', 'Draft'),
-        ('submitted', 'Submitted'),
-        ('under_review', 'Under Review'),
-        ('approved', 'Approved'),
-        ('rejected', 'Rejected'),
-        ('appealed', 'Appealed'),
-    ]
-    
-    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='permits')
-    applicant_name = models.CharField(max_length=200)
-    applicant_email = models.EmailField()
-    applicant_phone = models.CharField(max_length=20)
-    proposed_height_m = models.FloatField()
-    proposed_floors = models.IntegerField()
-    drawings = models.FileField(upload_to='permits/drawings/%Y/%m/', null=True, blank=True)
-    status = models.CharField(max_length=20, choices=STATUS, default='draft')
-    submitted_at = models.DateTimeField(auto_now_add=True)
-    reviewed_at = models.DateTimeField(null=True, blank=True)
-    decision_notes = models.TextField(blank=True)
-    permit_number = models.CharField(max_length=50, unique=True, null=True, blank=True)
-    permit_document = models.FileField(upload_to='permits/issued/%Y/%m/', null=True, blank=True)
-    expires_at = models.DateField(null=True, blank=True)
-    
-    class Meta:
-        ordering = ['-submitted_at']
-    
-    def __str__(self):
-        return f"Permit #{self.permit_number or 'Draft'} - {self.applicant_name}"
+        # === Step 2: Now get_or_create with FULL defaults (including geom) ===
+        defaults = {
+            'fid': None,
+            'type': self.type or "Aerodrome Buffer",
+            'latitude': self.latitude,
+            'longitude': self.longitude,
+            'latitude_decimal': self.geom.y,
+            'longitude_decimal': self.geom.x,
+            'elevation_m_ft': self.elevation_m_ft,
+            'geoid_undulation_m': self.geoid_undulation_m,
+            'remarks_spatial': self.remarks_spatial,
+            'admin_company': self.admin_company,
+            'admin_address': self.admin_address,
+            'admin_telephone': self.admin_telephone,
+            'admin_afs': self.admin_afs,
+            'admin_email': self.admin_email,
+            'traffic_permitted': self.traffic_permitted,
+            'magnetic_variation': self.magnetic_variation,
+            'annual_change': self.annual_change,
+            'remarks_nonspatial': self.remarks_nonspatial,
+            'admin_website': self.admin_website,
+            'layer': f"{radius_km}km_buffer",
+            'geom': geom_4326,
+            'area_km2': area_km2,
+        }
 
-class EnforcementCase(models.Model):
-    """Enforcement cases for violations"""
-    SEVERITY = [
-        ('low', 'Low'),
-        ('medium', 'Medium'),
-        ('high', 'High'),
-        ('critical', 'Critical'),
-    ]
+        buf, created = AerodromeBuffer.objects.get_or_create(
+            aerodrome=self,
+            radius_km=radius_km,
+            defaults=defaults
+        )
+
+        if created:
+            logging.getLogger(__name__).info(f"✅ Created new {radius_km}km buffer for {self.icao_code} (area: {area_km2} km²)")
+        else:
+            logging.getLogger(__name__).debug(f"Buffer {radius_km}km already existed for {self.icao_code}")
+
+        return buf
     
-    STATUS = [
-        ('open', 'Open'),
-        ('notice_sent', 'Notice Sent'),
-        ('escalated', 'Escalated'),
-        ('resolved', 'Resolved'),
-        ('penalty_issued', 'Penalty Issued'),
-    ]
-    
-    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='enforcements')
-    violation_type = models.CharField(max_length=20, choices=Building.COMPLIANCE_STATUS)
-    severity = models.CharField(max_length=10, choices=SEVERITY, default='medium')
-    detected_at = models.DateTimeField(auto_now_add=True)
-    detected_by = models.CharField(max_length=50, blank=True)  # 'inspection', 'drone', 'public', 'satellite'
-    notice_sent_at = models.DateField(null=True, blank=True)
-    compliance_deadline = models.DateField(null=True, blank=True)
-    status = models.CharField(max_length=20, choices=STATUS, default='open')
-    penalty_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    paid = models.BooleanField(default=False)
-    resolved_at = models.DateTimeField(null=True, blank=True)
-    notes = models.TextField(blank=True)
-    
+# new model for buffers - can be linked to Aerodrome via FK
+class AerodromeBuffer(models.Model):
+    aerodrome = models.ForeignKey(
+        Aerodrome, on_delete=models.CASCADE, related_name="buffers"
+    )
+    radius_km = models.IntegerField()  # e.g., 3,5,10,15 (or custom later)
+    fid = models.IntegerField(blank=True, null=True)  # From GeoJSON
+    type = models.CharField(
+        max_length=50, blank=True
+    )  # Increased max_length for safety
+    latitude = models.CharField(max_length=20, blank=True)
+    longitude = models.CharField(max_length=20, blank=True)
+    # Add new decimal fields for calculations
+    latitude_decimal = models.FloatField(blank=True, null=True)
+    longitude_decimal = models.FloatField(blank=True, null=True)
+    elevation_m_ft = models.CharField(max_length=100, blank=True)
+    geoid_undulation_m = models.CharField(max_length=20, blank=True)
+    remarks_spatial = models.TextField(
+        blank=True
+    )  # Use TextField for potentially longer content
+    admin_company = models.CharField(max_length=200, blank=True)
+    admin_address = models.TextField(blank=True)
+    admin_telephone = models.CharField(max_length=100, blank=True)
+    admin_afs = models.CharField(max_length=20, blank=True)
+    admin_email = models.EmailField(blank=True)
+    traffic_permitted = models.CharField(max_length=200, blank=True)
+    magnetic_variation = models.CharField(max_length=30, blank=True)
+    annual_change = models.CharField(max_length=30, blank=True)
+    remarks_nonspatial = models.TextField(blank=True)
+    admin_website = models.URLField(blank=True, null=True)
+    area_km2 = models.FloatField(blank=True, null=True)
+    layer = models.CharField(max_length=100, blank=True)
+    geom = models.MultiPolygonField(srid=4326)  # WGS84
+
     class Meta:
-        ordering = ['-detected_at']
-    
+        unique_together = (
+            "aerodrome",
+            "radius_km",
+        )  # No duplicates per aerodrome-radius
+        indexes = [
+            models.Index(fields=["aerodrome", "radius_km"]),  # For fast queries
+            GistIndex(fields=["geom"]),  # Spatial index for intersections/lookups
+        ]
+        verbose_name = "Aerodrome Buffer"
+        verbose_name_plural = "Aerodrome Buffers"
+
     def __str__(self):
-        return f"Case #{self.id} - {self.building} - {self.violation_type}"
+        return f"{self.aerodrome.icao_code} - {self.radius_km}km Buffer"
