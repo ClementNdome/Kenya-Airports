@@ -8,6 +8,10 @@
 
 This use case transforms the Kenya Civil Aviation Authority's (KCAA) statutory mandate for aerodrome obstacle control from a static public notice into an interactive, intelligent geospatial platform. The system enables real-time visualization, analysis, and compliance monitoring of development restrictions within airport vicinities, serving property owners, developers, regulators, and urban planners.
 
+Reference points:
+[https://www.linkedin.com/posts/kenyacaa_queries-that-have-been-made-on-this-public-activity-7425407380206735361-lO3a?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFhrTc8BunD3_jglTWjHFMWP7Y_HfL29WS0](https://www.linkedin.com/posts/kenyacaa_queries-that-have-been-made-on-this-public-activity-7425407380206735361-lO3a?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFhrTc8BunD3_jglTWjHFMWP7Y_HfL29WS0)
+
+[https://www.kcaa.or.ke/sites/default/files/circulars/CAA-AC-AGA032A%20Lighting%20and%20Marking%20of%20Obstacles_0.pdf](https://www.kcaa.or.ke/sites/default/files/circulars/CAA-AC-AGA032A%20Lighting%20and%20Marking%20of%20Obstacles_0.pdf)
 ---
 
 **🎯 2\. Primary Objectives**
@@ -16,7 +20,7 @@ This use case transforms the Kenya Civil Aviation Authority's (KCAA) statutory m
 | :---- | :---- |
 | **Public Empowerment** | Enable property owners/developers to instantly determine development restrictions |
 | **Regulatory Efficiency** | Automate compliance checking and permit processing for KCAA |
-| **Risk Mitigation** | Reduce aviation hazards from uncontrolled developments near airports |
+| **Risk Mitigation** | Reduce aviation hazards from uncontrolled developments near airports/aerodromes |
 | **Data-Driven Planning** | Provide urban planners with impact analysis tools for sustainable development |
 | **Enforcement Automation** | Track compliance status and generate automated enforcement actions |
 
