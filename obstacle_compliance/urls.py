@@ -37,4 +37,5 @@ urlpatterns = [
 
         # In obstacle_compliance/urls.py - add temporarily
     path('debug/', views.debug_geojson, name='debug'),
+    path('health/', views.health_check, name='health_check'),
 ]
