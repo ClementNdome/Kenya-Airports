@@ -1,12 +1,12 @@
 airports_kenya/
-├── airports_strips/          # Existing app - keep as is
+├── airports_strips/          # Existing app - nothing changes
 ├── obstacle_compliance/      # NEW APP - Aerodrome Obstacle Limitation
 │   ├── migrations/
-│   ├── templates/
+│   ├── templates/              # All the html templates using the jinja2 templating engine
 │   │   └── obstacle_compliance/
-│   │       ├── dashboard.html          # Main dashboard
+│   │       ├── dashboard.html          # Main dashboard including property check, bulk analysis and partials
 │   │       ├── airport_detail.html      # Single airport view
-│   │       ├── property_check.html      # Property lookup
+│   │       ├── property_check.html      # Property lookup - though to be implemented using basemaps or better options as currently no data for the buildings
 │   │       ├── bulk_analysis.html       # Bulk tools
 │   │       └── partials/
 │   │           ├── buffer_slider.html
