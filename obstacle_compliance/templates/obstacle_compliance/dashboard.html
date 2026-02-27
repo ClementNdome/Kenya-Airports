@@ -237,7 +237,7 @@
                                     <div class="small text-muted">Operational</div>
                                 </div>
                             </div>
-                            
+
                             <div class="col-6">
                                 <div class="text-center p-3 bg-light rounded-3">
                                     <div class="small text-muted mb-1">Last Updated</div>
@@ -479,11 +479,11 @@
                                         <strong>Elevation:</strong> ${props.elevation_display || 'N/A'}
                                     </p>
                                     <div style="margin-top: 8px; display: flex; gap: 5px;">
-                                        <a href="/obstacle-compliance/airport/${props.icao}/" 
+                                        {% comment %} <a href="/obstacle-compliance/airport/${props.icao}/" 
                                            class="btn btn-sm btn-primary" 
                                            style="padding: 2px 8px; font-size: 11px; text-decoration: none; color: white;">
                                             Details
-                                        </a>
+                                        </a> {% endcomment %}
                                         <a href="/obstacle-compliance/map/?airport=${props.icao}&radius=${currentRadius}" 
                                            class="btn btn-sm btn-outline-secondary" 
                                            style="padding: 2px 8px; font-size: 11px; text-decoration: none;">
