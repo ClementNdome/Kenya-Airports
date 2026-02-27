@@ -138,8 +138,8 @@ class AirportListView(ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['search'] = self.request.GET.get('search', '')
-        context['airport_type'] = self.request.GET.get('type', '')
-        context['airport_types'] = Aerodrome.objects.values_list('type', flat=True).distinct().order_by('type')
+        # context['airport_type'] = self.request.GET.get('type', '')
+        # context['airport_types'] = Aerodrome.objects.values_list('type', flat=True).distinct().order_by('type')
         return context
 
 
@@ -379,9 +379,16 @@ class BatchComplianceView(View):
 
 # obstacle_compliance/views.py - Update MapView class
 
+# obstacle_compliance/views.py - Updated MapView class
+
 class MapView(TemplateView):
     """
-    Interactive map view with buffer visualization
+    Interactive map view with full capabilities:
+    - Buffer visualization (3km, 5km, 10km, 15km)
+    - Airport locations with details
+    - Property compliance checking
+    - Elevation data from DEM
+    - Drawing tools for custom areas
     """
     template_name = 'obstacle_compliance/map_view.html'
     
@@ -391,31 +398,81 @@ class MapView(TemplateView):
         # Get active airport if specified
         icao = self.request.GET.get('airport')
         active_airport = None
+        map_center = [-1.2864, 36.8172]  # Default: Nairobi
+        map_zoom = 7
         
         if icao:
             try:
                 active_airport = Aerodrome.objects.get(icao_code=icao.upper())
+                map_center = [active_airport.geom.y, active_airport.geom.x]
+                map_zoom = 12
                 context['active_airport'] = active_airport
-                context['map_center'] = [active_airport.geom.y, active_airport.geom.x]
-                context['map_zoom'] = 12
             except Aerodrome.DoesNotExist:
-                # Log the error but don't break the page
                 logger.warning(f"Airport with ICAO code {icao} not found")
-                context['map_center'] = [-1.2864, 36.8172]  # Nairobi center
-                context['map_zoom'] = 8
-        else:
-            context['map_center'] = [-1.2864, 36.8172]  # Nairobi center
-            context['map_zoom'] = 8
         
-        # Default radius - ensure it's an integer
-        try:
-            context['default_radius'] = int(self.request.GET.get('radius', 15))
-        except ValueError:
-            context['default_radius'] = 15
+        # Get coordinates from query params (for property check)
+        lat = self.request.GET.get('lat')
+        lon = self.request.GET.get('lon')
+        if lat and lon:
+            try:
+                context['initial_lat'] = float(lat)
+                context['initial_lon'] = float(lon)
+                map_center = [float(lat), float(lon)]
+                map_zoom = 15
+            except ValueError:
+                pass
         
-        # Layer visibility - ensure boolean values
-        context['show_buffers'] = self.request.GET.get('buffers', 'true').lower() == 'true'
-        context['show_airports'] = self.request.GET.get('airports', 'true').lower() == 'true'
+        context['map_config'] = {
+            'center': map_center,
+            'zoom': map_zoom,
+            'max_zoom': 18,
+            'min_zoom': 6,
+            'default_radius': int(self.request.GET.get('radius', 15)),
+        }
+        
+        # Get all airports for the airports list sidebar
+        context['airports'] = Aerodrome.objects.all().order_by('name')[:50]
+        context['total_airports'] = Aerodrome.objects.count()
+        
+        # Buffer statistics
+        context['buffer_stats'] = {
+            '3km': AerodromeBuffer.objects.filter(radius_km=3).count(),
+            '5km': AerodromeBuffer.objects.filter(radius_km=5).count(),
+            '10km': AerodromeBuffer.objects.filter(radius_km=10).count(),
+            '15km': AerodromeBuffer.objects.filter(radius_km=15).count(),
+        }
+        
+        # Available basemaps
+        context['basemaps'] = [
+            {
+                'id': 'carto-light',
+                'name': 'Carto Light',
+                'url': 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                'attribution': '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; CartoDB',
+                'thumbnail': '/static/obstacle_compliance/images/basemaps/carto-light.jpg'
+            },
+            {
+                'id': 'satellite',
+                'name': 'Satellite',
+                'url': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                'attribution': '&copy; <a href="https://www.esri.com/">Esri</a>',
+                'thumbnail': '/static/obstacle_compliance/images/basemaps/satellite.jpg'
+            },
+            {
+                'id': 'terrain',
+                'name': 'Terrain',
+                'url': 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                'attribution': '&copy; <a href="https://opentopomap.org/">OpenTopoMap</a>',
+                'thumbnail': '/static/obstacle_compliance/images/basemaps/terrain.jpg'
+            },
+            {
+                'id': 'osm',
+                'name': 'OpenStreetMap',
+                'url': 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                'attribution': '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                'thumbnail': '/static/obstacle_compliance/images/basemaps/osm.jpg'
+            }
+        ]
         
         return context
 
