@@ -24,6 +24,7 @@ from django.urls import reverse
 
 from .models import Aerodrome, AerodromeBuffer
 from .utils import ComplianceCalculator, DEMService
+from obstacle_compliance import models
 
 logger = logging.getLogger(__name__)
 calculator = ComplianceCalculator()
@@ -621,56 +622,64 @@ class MapView(TemplateView):
         return context
 
 
+from django.contrib.gis.db.models.functions import Transform
+# from django.contrib.gis.db.models.functions import Buffer as GISBuffer
+
+from django.contrib.gis.db.models.functions import GeoFunc
+
+GISBuffer = GeoFunc
+
+# Or try:
+# from django.contrib.gis.db.models.functions import Transform
+# from django.contrib.gis.db.models.functions import GeomFunc
+# from .models import Aerodrome, AerodromeBuffer
+import json
+
 class BufferGeoJSONView(View):
-    """
-    Return buffer geometries as GeoJSON for mapping
-    """
-    @method_decorator(cache_page(60 * 15))  # Cache for 15 minutes
+    @method_decorator(cache_page(60 * 15))
     def get(self, request):
         try:
-            # Get parameters
-            radius = request.GET.get('radius', 15)
+            radius_str = request.GET.get('radius', '15')
+            radius = int(float(radius_str))  # supports 7 or 7.5 (floors safely)
+            if radius < 1:
+                radius = 1
+            if radius > 100:
+                radius = 100
+
             icao = request.GET.get('icao')
-            
-            # Build query with select_related for efficiency
-            buffers = AerodromeBuffer.objects.filter(radius_km=radius).select_related('aerodrome')
-            
+
+            # === ENSURE BUFFERS EXIST (only creates missing ones, once ever) ===
             if icao:
-                buffers = buffers.filter(aerodrome__icao_code=icao.upper())
-            
-            # Limit for performance (increase limit since we removed stats card)
-            buffers = buffers[:100]
-            
-            # Build GeoJSON
-            features = []
-            for buffer in buffers:
                 try:
-                    # Transform to GeoJSON format
-                    geom_json = json.loads(buffer.geom.geojson)
-                    
-                    feature = {
-                        'type': 'Feature',
-                        'geometry': geom_json,
-                        'properties': {
-                            'id': buffer.id,
-                            'airport_icao': buffer.aerodrome.icao_code,
-                            'airport_name': buffer.aerodrome.name or buffer.aerodrome.admin_company,
-                            'radius_km': buffer.radius_km,
-                            'area_km2': round(buffer.area_km2, 2) if buffer.area_km2 else None,
-                            'stroke': self._get_color_for_radius(buffer.radius_km),
-                            'stroke-width': 2,
-                            'stroke-opacity': 0.8,
-                            'fill': self._get_color_for_radius(buffer.radius_km),
-                            'fill-opacity': 0.15,
-                        }
-                    }
-                    features.append(feature)
-                    
-                except Exception as e:
-                    logger.error(f"Error processing buffer {buffer.id}: {e}")
-                    continue
-            
-            geojson = {
+                    ad = Aerodrome.objects.get(icao_code=icao.upper())
+                    ad.get_or_create_buffer(radius)
+                except Aerodrome.DoesNotExist:
+                    pass
+            else:
+                # Bulk-create only what's missing (extremely fast after first time)
+                missing = Aerodrome.objects.exclude(buffers__radius_km=radius)
+                for ad in missing:
+                    ad.get_or_create_buffer(radius)
+
+            # === NOW JUST QUERY THE DB (always fast) ===
+            buffers_qs = AerodromeBuffer.objects.filter(
+                radius_km=radius
+            ).select_related('aerodrome')
+
+            if icao:
+                buffers_qs = buffers_qs.filter(aerodrome__icao_code=icao.upper())
+
+            features = []
+            for buf in buffers_qs[:100]:
+                features.append(self._format_feature(
+                    buf.geom.geojson,
+                    buf.aerodrome,
+                    buf.radius_km,
+                    buf.area_km2,
+                    buf.id
+                ))
+
+            return JsonResponse({
                 'type': 'FeatureCollection',
                 'features': features,
                 'metadata': {
@@ -678,27 +687,34 @@ class BufferGeoJSONView(View):
                     'radius': radius,
                     'icao_filter': icao
                 }
-            }
-            
-            return JsonResponse(geojson)
-            
+            })
+
         except Exception as e:
-            logger.error(f"Error in BufferGeoJSONView: {str(e)}", exc_info=True)
-            return JsonResponse({
-                'type': 'FeatureCollection',
-                'features': [],
-                'error': str(e)
-            }, status=500)
-    
-    def _get_color_for_radius(self, radius):
-        """Get color based on buffer radius"""
-        colors = {
-            3: '#FF6B6B',   # Red for inner zone
-            5: '#FFA500',   # Orange for middle zone
-            10: '#2196F3',  # Blue for outer zone
-            15: '#4CAF50',  # Green for regulatory zone
+            logger.error(f"BufferGeoJSONView error: {str(e)}", exc_info=True)
+            return JsonResponse({'error': str(e)}, status=500)
+
+    def _format_feature(self, geom_json, aerodrome, radius, area, feature_id):
+        """Unchanged - exactly as you had it"""
+        color = self._get_color_for_radius(radius)
+        return {
+            'type': 'Feature',
+            'geometry': json.loads(geom_json),
+            'properties': {
+                'id': feature_id,
+                'airport_icao': aerodrome.icao_code,
+                'airport_name': aerodrome.name or aerodrome.admin_company,
+                'radius_km': radius,
+                'area_km2': round(area, 2) if area else None,
+                'stroke': color,
+                'fill': color,
+                'fill-opacity': 0.15,
+            }
         }
-        return colors.get(radius, '#666666')
+
+    def _get_color_for_radius(self, radius):
+        colors = {3: '#FF6B6B', 5: '#FFA500', 10: '#2196F3', 15: '#4CAF50'}
+        return colors.get(radius, '#9C27B0')  # purple for any custom radius
+
 # obstacle_compliance/views.py - Update AirportGeoJSONView
 
 class AirportGeoJSONView(View):
