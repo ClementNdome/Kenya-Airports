@@ -239,13 +239,12 @@ class PropertyComplianceView(TemplateView):
         return context
 
 
+# obstacle_compliance/views.py - Enhanced Property Compliance API
+
 class PropertyComplianceAPI(View):
     """
-    API endpoint for property compliance checks
+    Enhanced API endpoint for property compliance checks using DEM service
     """
-    @method_decorator(csrf_exempt)
-    def dispatch(self, *args, **kwargs):
-        return super().dispatch(*args, **kwargs)
     
     def get(self, request):
         """Handle GET request with query parameters"""
@@ -277,55 +276,200 @@ class PropertyComplianceAPI(View):
             if cached_result:
                 return JsonResponse(cached_result)
             
-            # Evaluate compliance
-            result = calculator.evaluate_property_all_airports(point, height)
+            # Evaluate compliance with full DEM context
+            result = self._enhanced_compliance_check(point, height)
             
-            # Cache result (5 minutes for API)
+            # Cache result
             cache.set(cache_key, result, 300)
             
             return JsonResponse(result)
             
         except Exception as e:
-            logger.error(f"Error in PropertyComplianceAPI GET: {str(e)}", exc_info=True)
+            logger.error(f"Error in PropertyComplianceAPI: {str(e)}", exc_info=True)
             return JsonResponse({
                 'status': 'ERROR',
                 'message': f'System error: {str(e)}'
             }, status=500)
     
-    def post(self, request):
-        """Handle POST request with JSON body"""
-        try:
-            data = json.loads(request.body)
+    def _enhanced_compliance_check(self, point, height):
+        """Enhanced compliance check with full DEM context"""
+        
+        # Get base compliance result
+        base_result = calculator.evaluate_property_all_airports(point, height)
+        
+        # Get detailed DEM information
+        dem_info = self._get_dem_context(point)
+        
+        # Enhance the result with DEM context
+        enhanced_result = {
+            **base_result,
+            'dem_context': dem_info,
+            'terrain_profile': self._get_terrain_profile(point),
+            'visualization': self._generate_visualization_data(point, height, base_result)
+        }
+        
+        return enhanced_result
+    
+    def _get_dem_context(self, point):
+        """Get detailed DEM context for a point"""
+        
+        # Get elevation with multiple samples for confidence
+        elevations = []
+        offsets = [(0,0), (0.001,0), (0,0.001), (-0.001,0), (0,-0.001)]
+        
+        for lon_off, lat_off in offsets:
+            sample_point = Point(point.x + lon_off, point.y + lat_off, srid=4326)
+            try:
+                elev = calculator.dem.get_elevation(sample_point)
+                if elev and elev > -500 and elev < 10000:  # Valid range
+                    elevations.append(elev)
+            except:
+                continue
+        
+        if not elevations:
+            return {
+                'elevation': None,
+                'confidence': 0,
+                'source': 'No valid DEM data',
+                'interpolation': 'Failed'
+            }
+        
+        # Calculate statistics
+        mean_elev = sum(elevations) / len(elevations)
+        std_dev = (sum((e - mean_elev) ** 2 for e in elevations) / len(elevations)) ** 0.5
+        
+        # Determine confidence based on variance
+        if std_dev < 1:
+            confidence = 95  # High confidence
+            quality = 'Excellent'
+        elif std_dev < 3:
+            confidence = 85  # Good confidence
+            quality = 'Good'
+        elif std_dev < 10:
+            confidence = 70  # Moderate confidence
+            quality = 'Fair'
+        else:
+            confidence = 50  # Low confidence
+            quality = 'Poor - High terrain variability'
+        
+        return {
+            'elevation': round(mean_elev, 1),
+            'samples_taken': len(elevations),
+            'std_deviation': round(std_dev, 2),
+            'confidence': confidence,
+            'quality': quality,
+            'source': 'SRTM 30m DEM',
+            'interpolation': 'Bilinear' if len(elevations) > 1 else 'Nearest neighbor',
+            'timestamp': datetime.now().isoformat()
+        }
+    
+    def _get_terrain_profile(self, point, distance=5000, directions=8):
+        """
+        Get terrain profile in multiple directions
+        Useful for visualizing approach paths
+        """
+        profiles = []
+        
+        # Sample in multiple directions
+        for angle in range(0, 360, 45):  # 8 directions
+            import math
+            rad = math.radians(angle)
+            profile = []
             
-            lat = data.get('lat')
-            lon = data.get('lon')
-            height = data.get('height', 30)
+            for dist in range(0, distance + 1, 100):  # Sample every 100m
+                dx = dist * math.sin(rad) / 111000  # Approximate degree to meters
+                dy = dist * math.cos(rad) / 111000
+                
+                sample_point = Point(point.x + dx, point.y + dy, srid=4326)
+                elev = calculator.dem.get_elevation(sample_point)
+                
+                profile.append({
+                    'distance': dist,
+                    'elevation': elev,
+                    'point': [sample_point.y, sample_point.x]
+                })
             
-            if not lat or not lon:
-                return JsonResponse({
-                    'status': 'ERROR',
-                    'message': 'Latitude and longitude are required'
-                }, status=400)
+            profiles.append({
+                'direction': angle,
+                'bearing': self._bearing_to_cardinal(angle),
+                'profile': profile
+            })
+        
+        return profiles
+    
+    def _bearing_to_cardinal(self, bearing):
+        """Convert bearing to cardinal direction"""
+        directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+        index = round(bearing / 45) % 8
+        return directions[index]
+    
+    def _generate_visualization_data(self, point, height, result):
+        """Generate data for 3D visualization"""
+        
+        viz_data = {
+            'point': [point.y, point.x],
+            'ground_elevation': result.get('primary_result', {}).get('ground_elevation'),
+            'building_top': result.get('primary_result', {}).get('building_top_amsl'),
+            'affected_airports': []
+        }
+        
+        # For each affected airport, generate OLS surface points
+        for airport in result.get('airports_affected', []):
+            # Get airport geometry
+            try:
+                airport_obj = Aerodrome.objects.get(icao_code=airport['icao'])
+                
+                # Generate OLS profile from airport to property
+                profile = self._generate_ols_profile(
+                    airport_obj.geom, 
+                    point, 
+                    airport_obj.elevation_m
+                )
+                
+                viz_data['affected_airports'].append({
+                    'icao': airport['icao'],
+                    'name': airport['name'],
+                    'profile': profile
+                })
+            except Aerodrome.DoesNotExist:
+                continue
+        
+        return viz_data
+    
+    def _generate_ols_profile(self, airport_point, property_point, airport_elev):
+        """Generate OLS surface profile between airport and property"""
+        
+        # Calculate distance and bearing
+        from geopy.distance import geodesic
+        airport_coords = (airport_point.y, airport_point.x)
+        property_coords = (property_point.y, property_point.x)
+        
+        total_distance = geodesic(airport_coords, property_coords).meters
+        
+        # Generate profile points
+        profile = []
+        for dist in range(0, int(total_distance) + 1, 100):
+            # Calculate OLS ceiling at this distance
+            ols_ceiling = calculator.calculate_ols_ceiling(airport_elev, dist)
             
-            point = Point(float(lon), float(lat), srid=4326)
-            height = float(height)
+            # Calculate point along line (simplified - would need proper interpolation)
+            ratio = dist / total_distance
+            lat = airport_point.y + (property_point.y - airport_point.y) * ratio
+            lon = airport_point.x + (property_point.x - airport_point.x) * ratio
             
-            result = calculator.evaluate_property_all_airports(point, height)
+            # Get ground elevation at this point
+            sample_point = Point(lon, lat, srid=4326)
+            ground_elev = calculator.dem.get_elevation(sample_point)
             
-            return JsonResponse(result)
-            
-        except json.JSONDecodeError:
-            return JsonResponse({
-                'status': 'ERROR',
-                'message': 'Invalid JSON'
-            }, status=400)
-        except Exception as e:
-            logger.error(f"Error in PropertyComplianceAPI POST: {str(e)}", exc_info=True)
-            return JsonResponse({
-                'status': 'ERROR',
-                'message': f'System error: {str(e)}'
-            }, status=500)
-
+            profile.append({
+                'distance': dist,
+                'ols_ceiling': ols_ceiling,
+                'ground_elevation': ground_elev,
+                'clearance': ols_ceiling - ground_elev if ols_ceiling else None,
+                'point': [lat, lon]
+            })
+        
+        return profile
 
 class BatchComplianceView(View):
     """
