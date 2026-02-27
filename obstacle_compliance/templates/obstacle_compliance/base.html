@@ -171,7 +171,7 @@
         <div class="container-fluid">
             <a class="navbar-brand" href="{% url 'obstacle_compliance:dashboard' %}">
                 <i class="fas fa-map-marked-alt me-2"></i>
-                KCAA Obstacle Control
+                REf. Compliance 
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
@@ -188,17 +188,17 @@
                             <i class="fas fa-map me-1"></i> Interactive Map
                         </a>
                     </li>
-                    <li class="nav-item">
+                    {% comment %} <li class="nav-item">
                         <a class="nav-link" href="{% url 'obstacle_compliance:airport_list' %}">
                             <i class="fas fa-plane me-1"></i> Airports
                         </a>
-                    </li>
+                    </li> {% endcomment %}
                     <li class="nav-item">
                         <a class="nav-link" href="{% url 'obstacle_compliance:property_check' %}">
-                            <i class="fas fa-building me-1"></i> Check Property
+                            <i class="fas fa-building me-1"></i> cooming soon
                         </a>
                     </li>
-                    <li class="nav-item dropdown">
+                    {% comment %} <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
                             <i class="fas fa-user me-1"></i> Account
                         </a>
@@ -208,7 +208,7 @@
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="#"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
                         </ul>
-                    </li>
+                    </li> {% endcomment %}
                 </ul>
             </div>
         </div>
@@ -229,19 +229,12 @@
                 <div class="col-md-6">
                     <p class="mb-0 text-muted">
                         <small>
-                            <i class="fas fa-copyright me-1"></i> {% now "Y" %} Kenya Civil Aviation Authority. 
+                            <i class="fas fa-copyright me-1"></i> {% now "Y" %} clm-maps.
                             All rights reserved.
                         </small>
                     </p>
                 </div>
-                <div class="col-md-6 text-end">
-                    <p class="mb-0 text-muted">
-                        <small>
-                            <i class="fas fa-info-circle me-1"></i> 
-                            Version 2.0 | Data from AIP Kenya
-                        </small>
-                    </p>
-                </div>
+                
             </div>
         </div>
     </footer>
