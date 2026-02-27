@@ -32,6 +32,22 @@ calculator = ComplianceCalculator()
 # ============================================
 # MAIN DASHBOARD VIEWS
 # ============================================
+from django.db import connections
+from django.db.utils import OperationalError
+def health_check(request):
+    """Health check endpoint to verify database connection"""
+    try:
+        # Test database connection
+        connections['default'].cursor().execute('SELECT 1')
+        return JsonResponse({
+            'status': 'healthy',
+            'database': 'connected'
+        })
+    except OperationalError as e:
+        return JsonResponse({
+            'status': 'unhealthy',
+            'database': str(e)
+        }, status=500)
 
 class ObstacleComplianceDashboard(TemplateView):
     """
@@ -970,7 +986,6 @@ def handler500(request):
 
 
 # Add this temporarily for debugging
-from django.http import HttpResponse
 
 def debug_geojson(request):
     """Debug endpoint to check GeoJSON data"""
