@@ -61,8 +61,8 @@ class Command(BaseCommand):
                     'type': feature['Type'].value,
                     'latitude': lat_dms,  # Keep original for reference
                     'longitude': lon_dms,  # Keep original for reference
-                    'latitude_decimal': lat_decimal,  # Add new field
-                    'longitude_decimal': lon_decimal,  # Add new field
+                    # 'latitude_decimal': lat_decimal,  # Add new field
+                    # 'longitude_decimal': lon_decimal,  # Add new field
                     'elevation_m_ft': feature['Elevation_m_ft'].value,
                     'geoid_undulation_m': feature['Geoid_Undulation_m'].value,
                     'remarks_spatial': feature['Remarks_Spatial'].value,
