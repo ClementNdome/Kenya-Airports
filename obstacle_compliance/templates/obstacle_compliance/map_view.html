@@ -483,7 +483,7 @@
             <div class="input-group input-group-sm w-100">
                 <input type="number" id="customRadiusInput" 
                        class="form-control" 
-                       placeholder="Custom (1-50)" 
+                       placeholder="Custom (1-15)" 
                        min="1" max="50" style="width: 80px;">
                 <span class="input-group-text">km</span>
                 <button class="btn btn-outline-primary btn-sm" type="button" id="applyCustomRadius">
@@ -788,11 +788,11 @@
                                                 <tr><td>Type:</td><td>${airport.type}</td></tr>
                                                 <tr><td>Elevation:</td><td>${airport.elevation_display}</td></tr>
                                             </table>
-                                            <div class="mt-2">
+                                            {% comment %} <div class="mt-2">
                                                 <a href="/obstacle-compliance/airport/${airport.icao}/" class="btn btn-sm btn-primary w-100">
                                                     View Details
                                                 </a>
-                                            </div>
+                                            </div> {% endcomment %}
                                         </div>
                                     `)
                                     .openOn(map);
