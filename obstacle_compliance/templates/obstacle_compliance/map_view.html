@@ -477,6 +477,21 @@
                 </button>
             </div>
         </div>
+        <!-- NEW: Custom radius input (same as dashboard) -->
+    <div class="controls-row">
+        <div class="control-group" style="width: 220px;">
+            <div class="input-group input-group-sm w-100">
+                <input type="number" id="customRadiusInput" 
+                       class="form-control" 
+                       placeholder="Custom (1-50)" 
+                       min="1" max="50" style="width: 80px;">
+                <span class="input-group-text">km</span>
+                <button class="btn btn-outline-primary btn-sm" type="button" id="applyCustomRadius">
+                    <i class="fas fa-check"></i>
+                </button>
+            </div>
+        </div>
+    </div>
         <div class="controls-row">
             <div class="control-group">
                 <button class="control-btn" id="toggleAirports">
@@ -599,9 +614,12 @@
         // BUFFER RADIUS CONTROLS
         // ============================================
         
+        let currentRadius = 15;   // ← NEW: track current radius
+
         document.querySelectorAll('[data-radius]').forEach(btn => {
             btn.addEventListener('click', function() {
                 const radius = parseInt(this.dataset.radius);
+                currentRadius = radius;
                 
                 // Update button states
                 document.querySelectorAll('[data-radius]').forEach(b => {
@@ -613,6 +631,32 @@
                     loadBuffers(radius);
                 }
             });
+        });
+
+        const customInput = document.getElementById('customRadiusInput');
+        const applyBtn = document.getElementById('applyCustomRadius');
+
+        applyBtn.addEventListener('click', function() {
+            let radius = parseFloat(customInput.value);
+            if (isNaN(radius) || radius < 1) radius = 1;
+            if (radius > 50) radius = 50;
+            
+            currentRadius = Math.round(radius);   // we store as integer
+            
+            // Deactivate preset buttons
+            document.querySelectorAll('[data-radius]').forEach(b => b.classList.remove('active'));
+            
+            if (document.getElementById('toggleBuffers').classList.contains('active')) {
+                loadBuffers(currentRadius);
+            }
+            
+            // Optional: show feedback
+            customInput.value = currentRadius;
+        });
+
+        // Allow pressing Enter in custom input
+        customInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') applyBtn.click();
         });
         
         // ============================================
