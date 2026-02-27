@@ -4,6 +4,9 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 import uuid
 from django.contrib.postgres.indexes import GistIndex  # Add this import
 
+import logging
+from django.contrib.gis.geos import MultiPolygon
+
 class Aerodrome(models.Model):
     """Your exact model from the data - with targeted enhancements"""
     fid = models.IntegerField(primary_key=True)
@@ -116,11 +119,71 @@ class Aerodrome(models.Model):
                 pass
         
         # If all else fails, log warning and return None
-        import logging
         logger = logging.getLogger(__name__)
         logger.warning(f"Could not parse elevation from: '{self.elevation_m_ft}' for airport {self.icao_code}")
         return None
+    
+    # ==================== NEW METHOD ====================
+        # ==================== FIXED METHOD ====================
+    def get_or_create_buffer(self, radius_km):
+        """Create a buffer for this aerodrome if it doesn't exist yet.
+        Uses proper projection for accuracy. Now handles NOT NULL geom correctly."""
+        radius_km = int(radius_km)
+        if not self.geom:
+            logging.getLogger(__name__).warning(f"Aerodrome {self.icao_code} has no geometry")
+            return None
 
+        # === Step 1: Compute the accurate buffer geometry FIRST ===
+        try:
+            geom_3857 = self.geom.transform(3857, clone=True)
+            buffered_3857 = geom_3857.buffer(radius_km * 1000)
+            area_km2 = round(buffered_3857.area / 1_000_000, 2)
+            geom_4326 = buffered_3857.transform(4326, clone=True)
+            if geom_4326.geom_type == 'Polygon':
+                geom_4326 = MultiPolygon(geom_4326)
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Buffer geometry calculation failed for {self.icao_code}: {e}")
+            return None
+
+        # === Step 2: Now get_or_create with FULL defaults (including geom) ===
+        defaults = {
+            'fid': None,
+            'type': self.type or "Aerodrome Buffer",
+            'latitude': self.latitude,
+            'longitude': self.longitude,
+            'latitude_decimal': self.geom.y,
+            'longitude_decimal': self.geom.x,
+            'elevation_m_ft': self.elevation_m_ft,
+            'geoid_undulation_m': self.geoid_undulation_m,
+            'remarks_spatial': self.remarks_spatial,
+            'admin_company': self.admin_company,
+            'admin_address': self.admin_address,
+            'admin_telephone': self.admin_telephone,
+            'admin_afs': self.admin_afs,
+            'admin_email': self.admin_email,
+            'traffic_permitted': self.traffic_permitted,
+            'magnetic_variation': self.magnetic_variation,
+            'annual_change': self.annual_change,
+            'remarks_nonspatial': self.remarks_nonspatial,
+            'admin_website': self.admin_website,
+            'layer': f"{radius_km}km_buffer",
+            'geom': geom_4326,
+            'area_km2': area_km2,
+        }
+
+        buf, created = AerodromeBuffer.objects.get_or_create(
+            aerodrome=self,
+            radius_km=radius_km,
+            defaults=defaults
+        )
+
+        if created:
+            logging.getLogger(__name__).info(f"✅ Created new {radius_km}km buffer for {self.icao_code} (area: {area_km2} km²)")
+        else:
+            logging.getLogger(__name__).debug(f"Buffer {radius_km}km already existed for {self.icao_code}")
+
+        return buf
+    
 # new model for buffers - can be linked to Aerodrome via FK
 class AerodromeBuffer(models.Model):
     aerodrome = models.ForeignKey(
