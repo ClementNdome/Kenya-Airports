@@ -129,7 +129,7 @@
                             <i class="fas fa-plane me-2 text-primary"></i>
                             Recent Aerodromes
                         </h5>
-                        <a href="{% url 'obstacle_compliance:airport_list' %}" class="btn btn-sm btn-outline-primary">
+                        <a href="{% url 'obstacle_compliance:map_view' %}" class="btn btn-sm btn-outline-primary">
                             View All <i class="fas fa-arrow-right ms-2"></i>
                         </a>
                     </div>
@@ -228,12 +228,7 @@
                     </div>
                     <div class="card-body">
                         <div class="row g-3">
-                            <div class="col-6">
-                                <div class="text-center p-3 bg-light rounded-3">
-                                    <div class="h5 mb-2 text-primary">{{ total_airports }}</div>
-                                    <div class="small text-muted">Aerodromes</div>
-                                </div>
-                            </div>
+
                             <div class="col-6">
                                 <div class="text-center p-3 bg-light rounded-3">
                                     <div class="h5 mb-2 text-success">
@@ -242,12 +237,20 @@
                                     <div class="small text-muted">Operational</div>
                                 </div>
                             </div>
-                            <div class="col-12">
+                            
+                            <div class="col-6">
                                 <div class="text-center p-3 bg-light rounded-3">
                                     <div class="small text-muted mb-1">Last Updated</div>
                                     <div class="h6 mb-0 text-dark">{% now "d M Y, H:i" %}</div>
                                 </div>
                             </div>
+                            
+                            {% comment %} <div class="col-12">
+                                <div class="text-center p-3 bg-light rounded-3">
+                                    <div class="small text-muted mb-1">Last Updated</div>
+                                    <div class="h6 mb-0 text-dark">{% now "d M Y, H:i" %}</div>
+                                </div>
+                            </div> {% endcomment %}
                         </div>
                     </div>
                 </div>
