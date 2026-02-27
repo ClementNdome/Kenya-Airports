@@ -14,17 +14,17 @@
                         <div>
                             <h4 class="mb-1">
                                 <i class="fas fa-tachometer-alt me-2"></i>
-                                Obstacle Compliance Dashboard
+                                 Dashboard
                             </h4>
-                            <p class="mb-0 opacity-75">
+                            {% comment %} <p class="mb-0 opacity-75">
                                 <i class="fas fa-info-circle me-2"></i>
                                 Monitor and analyze development restrictions around Kenyan aerodromes
-                            </p>
+                            </p> {% endcomment %}
                         </div>
                         <div class="d-flex gap-2">
                             <span class="badge bg-white text-primary p-3">
                                 <i class="fas fa-plane me-2"></i>
-                                {{ total_airports }} Aerodromes
+                                {{ total_airports }} ADs
                             </span>
                             {% comment %} <span class="badge bg-white text-success p-3">
                                 <i class="fas fa-draw-polygon me-2"></i>
@@ -130,16 +130,16 @@
                     <div class="d-grid gap-3">
                         <a href="{% url 'obstacle_compliance:property_check' %}" class="btn btn-primary btn-lg">
                             <i class="fas fa-search me-2"></i>
-                            Check Property Compliance
+                            Check coming soon
                         </a>
                         <a href="{% url 'obstacle_compliance:map_view' %}" class="btn btn-outline-primary">
                             <i class="fas fa-globe-africa me-2"></i>
                             Open Interactive Map
                         </a>
-                        <a href="{% url 'obstacle_compliance:airport_list' %}" class="btn btn-outline-primary">
+                        {% comment %} <a href="{% url 'obstacle_compliance:airport_list' %}" class="btn btn-outline-primary">
                             <i class="fas fa-list me-2"></i>
                             View All Airports
-                        </a>
+                        </a> {% endcomment %}
                         <hr>
                         <div class="bg-light p-3 rounded">
                             <h6 class="mb-2"><i class="fas fa-chart-simple me-2"></i>System Status</h6>
@@ -147,10 +147,10 @@
                                 <span>Total Aerodromes:</span>
                                 <span class="fw-bold">{{ total_airports }}</span>
                             </div>
-                            <div class="d-flex justify-content-between mb-1">
+                            {% comment %} <div class="d-flex justify-content-between mb-1">
                                 <span>Buffers (15km):</span>
                                 <span class="fw-bold">{{ buffer_stats.15km }}</span>
-                            </div>
+                            </div> {% endcomment %}
                             <div class="d-flex justify-content-between">
                                 <span>Last Updated:</span>
                                 <span class="fw-bold">{% now "d M Y" %}</span>
@@ -214,10 +214,10 @@
                                     </td>
                                     <td>
                                         <div class="btn-group btn-group-sm">
-                                            <a href="{% url 'obstacle_compliance:airport_detail' airport.icao_code %}" 
+                                            {% comment %} <a href="{% url 'obstacle_compliance:airport_detail' airport.icao_code %}" 
                                                class="btn btn-outline-primary" title="View Details">
                                                 <i class="fas fa-eye"></i>
-                                            </a>
+                                            </a> {% endcomment %}
                                             <a href="{% url 'obstacle_compliance:map_view' %}?airport={{ airport.icao_code }}&radius=15" 
                                                class="btn btn-outline-info" title="View on Map">
                                                 <i class="fas fa-map-marker-alt"></i>
