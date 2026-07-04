@@ -19,12 +19,15 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.views.generic import RedirectView
 
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
-    path('kenya-airports/', include('airports_strips.urls')),
-    path('', include('obstacle_compliance.urls')),
+    path("admin", admin.site.urls),
+    path('service-worker.js', RedirectView.as_view(url='/static/service-worker.js', permanent=False)),
+    path('', include(('obstacle_compliance.urls', 'obstacle_compliance'), namespace='obstacle_compliance')),
+    path('obstacle-compliance/', include(('obstacle_compliance.urls', 'obstacle_compliance'), namespace='obstacle_compliance_v2')),
+    path('airports-strips/', include('airports_strips.urls')),
 ]
 
 

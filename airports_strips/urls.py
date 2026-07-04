@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import *
+app_name = 'airports_strips'
 
 urlpatterns = [
     path('', AirportMapView.as_view()),
