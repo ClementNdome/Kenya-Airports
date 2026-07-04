@@ -1,1 +1,60 @@
+# GitLab CI/CD for GeoDjango Project (Kenya Airports)
+# Includes Auto DevOps for security scans, container building, and more.
 
+include:
+  - template: Auto-DevOps.gitlab-ci.yml
+
+stages:
+  - build
+  - test
+  - deploy
+  - review
+  - dast
+  - staging
+  - canary
+  - production
+  - incremental_rollout_10
+  - incremental_rollout_25
+  - incremental_rollout_50
+  - incremental_rollout_100
+  - performance
+  - cleanup
+
+variables:
+  # PostGIS service configuration for testing
+  POSTGRES_DB: airport_db
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: password
+  POSTGRES_HOST_AUTH_METHOD: trust
+  # Django environment variables for CI
+  DATABASE_URL: postgis://postgres:password@postgres:5432/airport_db
+  SECRET_KEY: "django-insecure-ci-test-key-replace-this-in-gitlab-variables"
+  DEBUG: "True"
+  ALLOWED_HOSTS: "*"
+
+# Custom test job to handle GeoDjango system dependencies
+test:
+  stage: test
+  image: python:3.12-slim
+  services:
+    - name: postgis/postgis:15-3.3
+      alias: postgres
+  before_script:
+    - apt-get update && apt-get install -y binutils libproj-dev gdal-bin libgdal-dev gcc postgresql-client
+    - pip install -r requirements.txt
+  script:
+    - echo "Running Django System Checks..."
+    - python manage.py check
+    - echo "Running Django Migrations in CI..."
+    - python manage.py migrate
+    - echo "Running Tests..."
+    - python manage.py test
+  artifacts:
+    paths:
+      - htmlcov/
+    expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+
+# Auto DevOps usually handles the build stage automatically if a Dockerfile is present.
+# The 'build' job from the template will use your Dockerfile to create a container image.
