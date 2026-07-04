@@ -23,8 +23,8 @@ from django.conf.urls.static import static
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path('', include('airports_strips.urls')),
-    path('obstacle-compliance/', include('obstacle_compliance.urls')),
+    path('kenya-airports/', include('airports_strips.urls')),
+    path('', include('obstacle_compliance.urls')),
 ]
 
 
