@@ -11,7 +11,7 @@ SECRET_KEY = config("SECRET_KEY", default="dummy-build-key")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 # DEBUG = config('DEBUG', default=False, cast=bool)  # <-- Read from .env
-DEBUG = True
+DEBUG = config("DEBUG", default=False)
 # ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="*").split(",")  # <-- Read from .env
 ALLOWED_HOSTS = ["*"]
 
