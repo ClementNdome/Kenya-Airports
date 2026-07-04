@@ -464,29 +464,45 @@
         const lat = document.getElementById('latitude').value;
         const lon = document.getElementById('longitude').value;
         const height = document.getElementById('height').value;
+        const btn = document.getElementById('downloadReport');
         
         showToast('Generating report...', 'info');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating...';
         
         fetch('/obstacle-compliance/api/generate-report/', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
             },
             body: JSON.stringify({ lat, lon, height })
         })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'SUCCESS') {
-                showToast('Report generated successfully', 'success');
-                // In production, redirect to PDF download
-            } else {
-                showToast('Error generating report', 'error');
+        .then(response => {
+            if (!response.ok) {
+                return response.json().catch(() => {
+                    throw new Error('Report generation failed');
+                }).then(err => { throw new Error(err.error || 'Report generation failed'); });
             }
+            return response.blob();
+        })
+        .then(blob => {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `KCAA_Compliance_${lat}_${lon}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            showToast('Report downloaded successfully', 'success');
         })
         .catch(error => {
             console.error('Report generation error:', error);
-            showToast('Error generating report', 'error');
+            showToast(error.message || 'Error generating report', 'error');
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-file-pdf me-2"></i>Download Full Report';
         });
     }
 </script>

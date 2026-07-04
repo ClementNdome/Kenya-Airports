@@ -868,6 +868,7 @@ class GeocodeView(View):
 # REPORT AND EXPORT VIEWS
 # ============================================
 
+@method_decorator(csrf_exempt, name='dispatch')
 class ComplianceReportView(View):
     """
     Generate a professional PDF report for a property compliance check
