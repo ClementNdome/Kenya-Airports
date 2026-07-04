@@ -54,8 +54,7 @@ pyHanko==0.33.0
 pyhanko-certvalidator==0.29.1
 pyparsing==3.3.2
 pypdf==6.7.3
-#  pyproj==3.7.1 
-pyproj @ https://github.com/pyproj4/pyproj/releases/download/v3.7.1/pyproj-3.7.1-cp312-cp312-manylinux_2_28_x86_64.whl
+# pyproj==3.7.1
 python-bidi==0.6.7
 python-dateutil==2.9.0.post0
 python-decouple==3.8
