@@ -1,0 +1,18 @@
+[tool.uv]
+environments = ["python_version >= '3.12'"]
+
+[tool.uv.sources]
+pyproj = { git = "https://github.com/pyproj4/pyproj", tag = "v3.7.1" }
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel", "pyproject-metadata", "setuptools-scm"]
+
+[tool.uv.build-requires]
+build = [
+    "cython>=3.0.0",
+    "setuptools>=61.0",
+    "wheel"
+]
+
+[tool.uv.build-environment]
+PROJ_DIR = "/usr/local"
