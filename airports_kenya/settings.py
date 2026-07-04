@@ -7,7 +7,7 @@ import dj_database_url  # <-- Add this line
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key secret!
-SECRET_KEY = config("SECRET_KEY")  # <-- Read from .env
+SECRET_KEY = config("SECRET_KEY", default="dummy-build-key")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 # DEBUG = config('DEBUG', default=False, cast=bool)  # <-- Read from .env
