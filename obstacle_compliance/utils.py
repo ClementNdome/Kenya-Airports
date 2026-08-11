@@ -1,12 +1,24 @@
 # obstacle_compliance/utils.py
+import csv
+import io
+import logging
+import os
+from datetime import datetime
+from io import BytesIO
+
 import rasterio
+from django.conf import settings
 from django.core.cache import cache
+from django.core.mail import send_mail
 from django.contrib.gis.geos import Point
 from django.contrib.gis.db.models.functions import Distance
+from django.template.loader import render_to_string
+from django.urls import reverse
 from functools import lru_cache
 from geopy.distance import geodesic
+from xhtml2pdf import pisa
+
 from .models import Aerodrome, AerodromeBuffer
-import logging
 # from dotenv import load_dotenv
 import os
 from decouple import config
@@ -576,4 +588,164 @@ class ComplianceCalculator:
         return Aerodrome.objects.filter(
             geom__distance_lte=(prop_point, D(km=radius_km))
         ).distance(prop_point).order_by('distance')
-# Additional utility functions can be added here as needed
+class ApplicationWorkflow:
+    TRANSITIONS = {
+        'draft': ['submitted'],
+        'submitted': ['under_review'],
+        'under_review': ['approved', 'rejected'],
+        'approved': ['revoked'],
+        'rejected': ['submitted'],
+        'revoked': [],
+    }
+
+    @classmethod
+    def can_transition(cls, from_status, to_status):
+        return to_status in cls.TRANSITIONS.get(from_status, [])
+
+    @classmethod
+    def transition(cls, application, to_status, user=None, notes=''):
+        if not cls.can_transition(application.status, to_status):
+            raise ValueError(f"Cannot transition from {application.status} to {to_status}")
+        from datetime import datetime
+        application.status = to_status
+        if to_status == 'submitted':
+            application.submitted_at = datetime.now()
+        elif to_status in ('approved', 'rejected'):
+            application.reviewed_by = user
+            application.reviewed_at = datetime.now()
+            application.reviewer_notes = notes
+            if to_status == 'approved':
+                application.certificate_number = f"KCAA-{datetime.now():%Y%m%d}-{application.id:05d}"
+        application.save()
+
+
+def process_bulk_upload(job):
+    """
+    Process a BulkUploadJob: read CSV, run compliance checks on each row.
+    Expected CSV columns: name, latitude, longitude, height_m
+    """
+    from .models import Property, ComplianceCheck, Notification
+
+    job.status = 'processing'
+    job.save(update_fields=['status'])
+
+    from django.contrib.gis.geos import Point
+
+    calculator = ComplianceCalculator()
+    errors = []
+    success_count = 0
+    warning_count = 0
+    total_rows = 0
+
+    try:
+        csv_file = job.csv_file.read().decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(csv_file))
+
+        for row in reader:
+            total_rows += 1
+            try:
+                name = row.get('name', '').strip()
+                lat = float(row.get('latitude', 0))
+                lon = float(row.get('longitude', 0))
+                height = float(row.get('height_m', 30))
+
+                if not name:
+                    warning_count += 1
+                    errors.append(f"Row {total_rows}: missing name, skipped")
+                    continue
+
+                point = Point(lon, lat, srid=4326)
+                result = calculator.evaluate_property_all_airports(point, height)
+
+                prop, created = Property.objects.get_or_create(
+                    user=job.user, name=name,
+                    defaults={'latitude': lat, 'longitude': lon, 'height_m': height}
+                )
+                if not created:
+                    prop.latitude = lat
+                    prop.longitude = lon
+                    prop.height_m = height
+                    prop.save(update_fields=['latitude', 'longitude', 'height_m'])
+
+                ComplianceCheck.objects.create(
+                    property=prop,
+                    result_json=result,
+                    status=result.get('status', 'UNKNOWN'),
+                    score=result.get('compliance_score', 0),
+                    primary_airport_icao=result.get('primary_airport', {}).get('icao', ''),
+                    airports_affected=result.get('airports_affected_count', 0),
+                    requires_lighting=result.get('requires_lighting', False),
+                    is_hazard=result.get('is_hazard', False),
+                    trigger='bulk',
+                )
+                success_count += 1
+
+            except (ValueError, KeyError) as e:
+                errors.append(f"Row {total_rows}: {str(e)}")
+                warning_count += 1
+
+        job.total_rows = total_rows
+        job.processed_rows = total_rows
+        job.success_count = success_count
+        job.warning_count = warning_count
+        job.error_count = len(errors) - warning_count
+        job.error_log = '\n'.join(errors[-50:]) if errors else ''
+        job.status = 'completed'
+        job.completed_at = datetime.now()
+        job.save()
+
+        Notification.objects.create(
+            user=job.user,
+            notification_type='bulk_complete',
+            title='Bulk upload complete',
+            message=f'Processed {success_count}/{total_rows} properties successfully.',
+            link='/bulk-upload/',
+        )
+
+    except Exception as e:
+        job.status = 'failed'
+        job.error_log = str(e)
+        job.completed_at = datetime.now()
+        job.save()
+
+
+def generate_certificate_pdf(application):
+    """Generate a PDF certificate for an approved ComplianceApplication."""
+    html = render_to_string('obstacle_compliance/certificate_pdf.html', {
+        'app': application,
+        'property': application.property,
+        'site_url': settings.SITE_URL,
+    })
+    buffer = BytesIO()
+    pisa_status = pisa.CreatePDF(BytesIO(html.encode('UTF-8')), dest=buffer)
+    if pisa_status.err:
+        raise RuntimeError(f"PDF generation failed: {pisa_status.err}")
+
+    filename = f"certificate_{application.certificate_number}.pdf"
+    from django.core.files.base import ContentFile
+    application.certificate_pdf.save(filename, ContentFile(buffer.getvalue()))
+    application.save(update_fields=['certificate_pdf'])
+    return application.certificate_pdf.url if application.certificate_pdf else None
+
+
+def send_notification_email(notification):
+    """Send an email for a Notification if not already sent."""
+    if notification.email_sent:
+        return
+
+    subject = f"KCAA OCS: {notification.title}"
+    profile_url = f"{settings.SITE_URL}{reverse('obstacle_compliance:notification_list')}"
+    message = f"{notification.message}\n\nView: {profile_url}"
+
+    try:
+        send_mail(
+            subject=subject,
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[notification.user.email],
+            fail_silently=True,
+        )
+        notification.email_sent = True
+        notification.save(update_fields=['email_sent'])
+    except Exception:
+        pass

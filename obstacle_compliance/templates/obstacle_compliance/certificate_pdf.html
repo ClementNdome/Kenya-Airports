@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @page { size: A4; margin: 2cm; }
+    body { font-family: 'Helvetica', 'Arial', sans-serif; color: #333; }
+    .header { text-align: center; border-bottom: 3px solid #0d6efd; padding-bottom: 15px; margin-bottom: 20px; }
+    .header h1 { color: #0d6efd; font-size: 22px; margin: 5px 0; }
+    .header h2 { font-size: 16px; color: #666; margin: 5px 0; }
+    .badge { display: inline-block; background: #198754; color: white; padding: 5px 15px; border-radius: 4px; font-size: 14px; margin: 10px 0; }
+    .details { margin: 20px 0; }
+    .details table { width: 100%; border-collapse: collapse; }
+    .details td, .details th { padding: 8px 12px; border-bottom: 1px solid #eee; text-align: left; }
+    .details th { width: 40%; color: #666; }
+    .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 11px; color: #999; border-top: 1px solid #eee; padding-top: 10px; }
+    .stamp { text-align: right; margin-top: 30px; }
+    .stamp .line { border-top: 2px solid #333; width: 250px; margin-left: auto; padding-top: 5px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>KENYA CIVIL AVIATION AUTHORITY</h1>
+    <h2>Obstacle Compliance Certificate</h2>
+    <div class="badge">APPROVED</div>
+  </div>
+
+  <div class="details">
+    <table>
+      <tr><th>Certificate Number</th><td>{{ app.certificate_number }}</td></tr>
+      <tr><th>Property Name</th><td>{{ property.name }}</td></tr>
+      <tr><th>Location</th><td>{{ property.latitude|floatformat:6 }}, {{ property.longitude|floatformat:6 }}</td></tr>
+      <tr><th>Structure Height</th><td>{{ property.height_m }} meters</td></tr>
+      <tr><th>Compliance Score</th><td>{{ property.last_score|floatformat:1 }}%</td></tr>
+      <tr><th>Status</th><td>{{ property.last_status }}</td></tr>
+      <tr><th>Issued Date</th><td>{{ app.reviewed_at|date:"d F Y" }}</td></tr>
+      <tr><th>Valid Until</th><td>{{ app.valid_until|date:"d F Y" }}</td></tr>
+      <tr><th>Reviewed By</th><td>{{ app.reviewed_by.get_full_name|default:app.reviewed_by.username }}</td></tr>
+    </table>
+  </div>
+
+  <p>This certifies that the above referenced property has been assessed against the Kenya Civil Aviation Authority (KCAA) obstacle limitation surfaces requirements and is found to be in compliance with the applicable regulations.</p>
+
+  <div class="stamp">
+    <p>Authorized Signature</p>
+    <div class="line">{{ app.reviewed_by.get_full_name|default:app.reviewed_by.username }}</div>
+    <p style="font-size:12px;color:#666;">Director of Air Navigation Services</p>
+  </div>
+
+  <div class="footer">
+    KCAA Obstacle Compliance System &bull; {{ site_url }} &bull; Certificate {{ app.certificate_number }}
+  </div>
+</body>
+</html>

@@ -1,0 +1,86 @@
+{% extends 'obstacle_compliance/base.html' %}
+{% block title %}Application #{{ application.pk }}{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <div class="row justify-content-center">
+    <div class="col-md-8">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h4 class="mb-0"><i class="fas fa-file-alt me-2"></i>Application #{{ application.pk }}</h4>
+          <span class="status-badge {{ application.status }}">{{ application.get_status_display }}</span>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-6">
+              <table class="table table-borderless">
+                <tr><th>Property</th><td>{{ application.property.name }}</td></tr>
+                <tr><th>Submitted</th><td>{{ application.submitted_at|date:"Y-m-d H:i"|default:"Not yet submitted" }}</td></tr>
+                <tr><th>Reviewed By</th><td>{{ application.reviewed_by|default:"—" }}</td></tr>
+                <tr><th>Reviewed At</th><td>{{ application.reviewed_at|date:"Y-m-d H:i"|default:"—" }}</td></tr>
+                <tr><th>Reviewer Notes</th><td>{{ application.reviewer_notes|default:"—" }}</td></tr>
+                <tr><th>Certificate #</th><td>{{ application.certificate_number|default:"—" }}</td></tr>
+                <tr><th>Valid Until</th><td>{{ application.valid_until|date:"Y-m-d"|default:"—" }}</td></tr>
+                <tr><th>Fee Paid</th><td>{% if application.fee_paid %}<i class="fas fa-check text-success"></i>{% else %}<i class="fas fa-times text-danger"></i>{% endif %}</td></tr>
+              </table>
+            </div>
+            <div class="col-md-6">
+              <h6>Status Timeline</h6>
+              <ul class="timeline">
+                <li class="{% if application.status == 'draft' %}fw-bold{% endif %}">
+                  <span class="timeline-badge">1</span>
+                  <span>Draft — created {{ application.created_at|date:"Y-m-d H:i" }}</span>
+                </li>
+                {% if application.submitted_at %}
+                <li class="{% if application.status == 'submitted' or application.status == 'under_review' or application.status == 'approved' or application.status == 'rejected' %}fw-bold{% endif %}">
+                  <span class="timeline-badge">2</span>
+                  <span>Submitted — {{ application.submitted_at|date:"Y-m-d H:i" }}</span>
+                </li>
+                {% endif %}
+                {% if application.status == 'under_review' or application.status == 'approved' or application.status == 'rejected' %}
+                <li class="{% if application.status == 'under_review' %}fw-bold{% endif %}">
+                  <span class="timeline-badge">3</span>
+                  <span>Under Review</span>
+                </li>
+                {% endif %}
+                {% if application.reviewed_at %}
+                <li class="{% if application.status == 'approved' or application.status == 'rejected' %}fw-bold{% endif %}">
+                  <span class="timeline-badge">{{ application.status == 'approved' or application.status == 'rejected'|yesno:"4,3" }}</span>
+                  <span>{% if application.status == 'approved' %}Approved ✅{% elif application.status == 'rejected' %}Rejected ❌{% endif %} — {{ application.reviewed_at|date:"Y-m-d H:i" }}</span>
+                  {% if application.reviewer_notes %}<br><small class="text-muted">Notes: {{ application.reviewer_notes }}</small>{% endif %}
+                </li>
+                {% endif %}
+              </ul>
+            </div>
+          </div>
+
+          {% if application.status == 'draft' %}
+            <form method="post" action="{% url 'obstacle_compliance:application_submit' application.pk %}">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-success w-100">
+                <i class="fas fa-paper-plane me-1"></i>Submit for Review
+              </button>
+            </form>
+          {% endif %}
+
+          {% if application.certificate_pdf %}
+          <div class="mt-3">
+            <a href="{{ application.certificate_pdf.url }}" class="btn btn-outline-success" target="_blank"><i class="fas fa-file-pdf me-1"></i>Download Certificate</a>
+          </div>
+          {% endif %}
+
+          <div class="mt-3">
+            <a href="{% url 'obstacle_compliance:application_list' %}" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-1"></i>Back to Applications</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .timeline { list-style: none; padding: 0; }
+  .timeline li { padding: 8px 0 8px 30px; position: relative; border-left: 2px solid #dee2e6; margin-left: 10px; }
+  .timeline li:last-child { border-left-color: transparent; }
+  .timeline-badge { position: absolute; left: -12px; width: 24px; height: 24px; background: #0d6efd; color: white; border-radius: 50%; text-align: center; font-size: 12px; line-height: 24px; font-weight: 600; }
+</style>
+{% endblock %}

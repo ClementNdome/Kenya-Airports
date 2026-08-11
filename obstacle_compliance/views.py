@@ -1,15 +1,20 @@
 # obstacle_compliance/views.py - Updated views
 
+import csv
 import json
 import logging
 import io
+import hashlib
 from datetime import datetime
+
+import requests
 from xhtml2pdf import pisa
 from django.template.loader import render_to_string
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse, HttpResponse
 from django.views import View
 from django.views.generic import TemplateView, ListView, DetailView
+from django.views.generic.edit import CreateView, UpdateView, DeleteView
 from django.contrib.gis.geos import Point, GEOSGeometry
 from django.contrib.gis.db.models.functions import Distance
 from django.contrib.gis.measure import D
@@ -20,10 +25,14 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.cache import cache_page
 from django.core.paginator import Paginator
-from django.urls import reverse
+from django.urls import reverse, reverse_lazy
+from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
+from django.contrib.auth.mixins import LoginRequiredMixin
 
-from .models import Aerodrome, AerodromeBuffer
-from .utils import ComplianceCalculator, DEMService
+from .models import Aerodrome, AerodromeBuffer, UserProfile, Property, ComplianceCheck, Notification, ComplianceApplication, BulkUploadJob
+from .utils import ComplianceCalculator, DEMService, ApplicationWorkflow
 from obstacle_compliance import models
 
 logger = logging.getLogger(__name__)
@@ -846,22 +855,321 @@ class SearchView(View):
 
 class GeocodeView(View):
     """
-    Geocode an address to coordinates (placeholder - integrate with real geocoder)
+    Geocode an address to lat/lon using OpenStreetMap Nominatim.
+    GET /api/geocode/?address=Nairobi
     """
+    NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search'
+    USER_AGENT = 'KCAAObstacleCompliance/1.0'
+    CACHE_DURATION = 86400
+
     def get(self, request):
-        address = request.GET.get('address', '')
-        
+        address = request.GET.get('address', '').strip()
         if not address:
-            return JsonResponse({'error': 'Address required'}, status=400)
-        
-        # Placeholder - in production, use Google Maps API, Mapbox, or OpenStreetMap
-        # For now, return Nairobi center for any address
+            return JsonResponse({'error': 'Address parameter is required'}, status=400)
+
+        cache_key = f'geocode_{hashlib.md5(address.lower().encode()).hexdigest()}'
+        cached = cache.get(cache_key)
+        if cached:
+            return JsonResponse(cached)
+
+        params = {
+            'q': address,
+            'format': 'json',
+            'limit': 5,
+            'addressdetails': 1,
+            'countrycodes': 'ke',
+        }
+        headers = {'User-Agent': self.USER_AGENT}
+
+        try:
+            resp = requests.get(self.NOMINATIM_URL, params=params, headers=headers, timeout=10)
+            resp.raise_for_status()
+            results = resp.json()
+
+            if not results:
+                return JsonResponse({'error': 'Address not found'}, status=404)
+
+            suggestions = []
+            for r in results:
+                suggestions.append({
+                    'lat': float(r['lat']),
+                    'lon': float(r['lon']),
+                    'display_name': r.get('display_name', ''),
+                    'type': r.get('type', ''),
+                })
+
+            response_data = {'results': suggestions}
+            cache.set(cache_key, response_data, self.CACHE_DURATION)
+            return JsonResponse(response_data)
+
+        except requests.RequestException as e:
+            logger.error(f"Geocoding error: {e}")
+            return JsonResponse({'error': 'Geocoding service unavailable'}, status=503)
+
+
+class ReverseGeocodeView(View):
+    """
+    Reverse geocode lat/lon to address.
+    GET /api/reverse-geocode/?lat=-1.2864&lon=36.8172
+    """
+    NOMINATIM_URL = 'https://nominatim.openstreetmap.org/reverse'
+    USER_AGENT = 'KCAAObstacleCompliance/1.0'
+    CACHE_DURATION = 86400
+
+    def get(self, request):
+        try:
+            lat = float(request.GET.get('lat'))
+            lon = float(request.GET.get('lon'))
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'Valid lat and lon parameters required'}, status=400)
+
+        cache_key = f'revgeo_{lat:.4f}_{lon:.4f}'
+        cached = cache.get(cache_key)
+        if cached:
+            return JsonResponse(cached)
+
+        params = {
+            'lat': lat,
+            'lon': lon,
+            'format': 'json',
+            'addressdetails': 1,
+        }
+        headers = {'User-Agent': self.USER_AGENT}
+
+        try:
+            resp = requests.get(self.NOMINATIM_URL, params=params, headers=headers, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+
+            result = {
+                'display_name': data.get('display_name', ''),
+                'address': data.get('address', {}),
+                'lat': float(data['lat']),
+                'lon': float(data['lon']),
+            }
+            cache.set(cache_key, result, self.CACHE_DURATION)
+            return JsonResponse(result)
+
+        except requests.RequestException as e:
+            logger.error(f"Reverse geocoding error: {e}")
+            return JsonResponse({'error': 'Geocoding service unavailable'}, status=503)
+
+
+# ============================================
+# PORTED AIRPORTS_STRIPS VIEWS (Data Unification)
+# ============================================
+
+from django.contrib.gis.db.models.functions import Distance
+from geopy.distance import geodesic
+
+
+class AirportsNearEquatorAPI(View):
+    """Airports within ~50km of the equator."""
+    def get(self, request):
+        airports = Aerodrome.objects.filter(
+            geom__y__gte=-0.45, geom__y__lte=0.45
+        ).values('icao_code', 'name', 'geom')
+        data = []
+        for a in airports:
+            data.append({
+                'icao_code': a['icao_code'],
+                'name': a['name'],
+                'latitude': a['geom'].y if a['geom'] else None,
+                'longitude': a['geom'].x if a['geom'] else None,
+            })
+        return JsonResponse({'airports': data, 'count': len(data)})
+
+
+class AirportsWithinRadiusAPI(View):
+    """Airports within a given radius of a point. GET /api/airports/within-radius/?lat=...&lon=...&radius=50000"""
+    def get(self, request):
+        try:
+            lat = float(request.GET.get('lat'))
+            lon = float(request.GET.get('lon'))
+            radius_m = float(request.GET.get('radius', 50000))
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'Valid lat, lon, and optional radius required'}, status=400)
+
+        point = Point(lon, lat, srid=4326)
+        airports = Aerodrome.objects.annotate(
+            dist=Distance('geom', point)
+        ).filter(dist__lte=radius_m).order_by('dist')
+
+        data = [{
+            'icao_code': a.icao_code,
+            'name': a.name,
+            'distance_m': round(a.dist.m, 1),
+            'distance_km': round(a.dist.m / 1000, 2),
+        } for a in airports]
+        return JsonResponse({'airports': data, 'count': len(data)})
+
+
+class NearestAirportAPI(View):
+    """Nearest aerodrome to a point. GET /api/airports/nearest/?lat=...&lon=..."""
+    def get(self, request):
+        try:
+            lat = float(request.GET.get('lat'))
+            lon = float(request.GET.get('lon'))
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'Valid lat and lon required'}, status=400)
+
+        point = Point(lon, lat, srid=4326)
+        nearest = Aerodrome.objects.annotate(
+            dist=Distance('geom', point)
+        ).order_by('dist').first()
+
+        if not nearest:
+            return JsonResponse({'error': 'No airports found'}, status=404)
+
+        dist_km = geodesic((lat, lon), (nearest.geom.y, nearest.geom.x)).kilometers
         return JsonResponse({
-            'lat': -1.2864,
-            'lon': 36.8172,
-            'display_name': f"Nairobi, Kenya ({address})",
-            'place_id': 'placeholder'
+            'icao_code': nearest.icao_code,
+            'name': nearest.name,
+            'distance_km': round(dist_km, 2),
+            'latitude': nearest.geom.y,
+            'longitude': nearest.geom.x,
         })
+
+
+class DistanceBetweenAirportsAPI(View):
+    """Distance between two aerodromes by ICAO."""
+    def get(self, request):
+        icao1 = request.GET.get('airport1', '').upper()
+        icao2 = request.GET.get('airport2', '').upper()
+        if not icao1 or not icao2:
+            return JsonResponse({'error': 'airport1 and airport2 ICAO codes required'}, status=400)
+
+        try:
+            a1 = Aerodrome.objects.get(icao_code=icao1)
+            a2 = Aerodrome.objects.get(icao_code=icao2)
+        except Aerodrome.DoesNotExist:
+            return JsonResponse({'error': 'One or both airports not found'}, status=404)
+
+        if not a1.geom or not a2.geom:
+            return JsonResponse({'error': 'Coordinate data missing for one or both airports'}, status=400)
+
+        dist_km = geodesic((a1.geom.y, a1.geom.x), (a2.geom.y, a2.geom.x)).kilometers
+        return JsonResponse({
+            'airport1': {'icao_code': a1.icao_code, 'name': a1.name},
+            'airport2': {'icao_code': a2.icao_code, 'name': a2.name},
+            'distance_km': round(dist_km, 2),
+        })
+
+
+# ============================================
+# AUTHENTICATION VIEWS (Feature 1)
+# ============================================
+
+class RegisterView(CreateView):
+    form_class = UserCreationForm
+    template_name = 'registration/register.html'
+    success_url = reverse_lazy('obstacle_compliance:login')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Create Account'
+        return context
+
+
+class ProfileView(LoginRequiredMixin, UpdateView):
+    model = UserProfile
+    template_name = 'registration/profile.html'
+    fields = ['company', 'phone', 'organization_type']
+    success_url = reverse_lazy('obstacle_compliance:profile')
+
+    def get_object(self, queryset=None):
+        return self.request.user.profile
+
+
+# ============================================
+# PROPERTY PORTFOLIO VIEWS (Feature 1)
+# ============================================
+
+class PropertyListView(LoginRequiredMixin, ListView):
+    model = Property
+    template_name = 'obstacle_compliance/property_list.html'
+    context_object_name = 'properties'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return Property.objects.filter(user=self.request.user, is_active=True)
+
+
+class PropertyCreateView(LoginRequiredMixin, CreateView):
+    model = Property
+    template_name = 'obstacle_compliance/property_form.html'
+    fields = ['name', 'address', 'latitude', 'longitude', 'height_m', 'notes']
+    success_url = reverse_lazy('obstacle_compliance:property_list')
+
+    def form_valid(self, form):
+        form.instance.user = self.request.user
+        return super().form_valid(form)
+
+
+class PropertyDetailView(LoginRequiredMixin, DetailView):
+    model = Property
+    template_name = 'obstacle_compliance/property_detail.html'
+
+    def get_queryset(self):
+        return Property.objects.filter(user=self.request.user)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['recent_checks'] = self.object.checks.all()[:10]
+        return context
+
+
+class PropertyUpdateView(LoginRequiredMixin, UpdateView):
+    model = Property
+    template_name = 'obstacle_compliance/property_form.html'
+    fields = ['name', 'address', 'latitude', 'longitude', 'height_m', 'notes']
+    success_url = reverse_lazy('obstacle_compliance:property_list')
+
+    def get_queryset(self):
+        return Property.objects.filter(user=self.request.user)
+
+
+class PropertyDeleteView(LoginRequiredMixin, DeleteView):
+    model = Property
+    template_name = 'obstacle_compliance/property_confirm_delete.html'
+    success_url = reverse_lazy('obstacle_compliance:property_list')
+
+    def get_queryset(self):
+        return Property.objects.filter(user=self.request.user)
+
+
+class PropertyCheckView(LoginRequiredMixin, View):
+    """Run compliance check on a saved property."""
+
+    def post(self, request, pk):
+        prop = get_object_or_404(Property, pk=pk, user=request.user)
+        check = prop.run_compliance_check()
+
+        return JsonResponse({
+            'status': check.status,
+            'score': check.score,
+            'checked_at': check.checked_at.isoformat(),
+            'detail_url': reverse('obstacle_compliance:property_detail', args=[prop.pk]),
+        })
+
+
+class SavePropertyFromCheckView(LoginRequiredMixin, View):
+    """Save from quick-check form results."""
+
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+            prop = Property.objects.create(
+                user=request.user,
+                name=data.get('name', f"Property @ {data['lat']:.4f}, {data['lon']:.4f}"),
+                latitude=float(data['lat']),
+                longitude=float(data['lon']),
+                height_m=float(data.get('height', 30)),
+                address=data.get('address', ''),
+            )
+            return JsonResponse({'id': prop.pk, 'name': prop.name, 'status': 'created'})
+        except (KeyError, ValueError, TypeError) as e:
+            return JsonResponse({'error': str(e)}, status=400)
 
 
 # ============================================
@@ -998,3 +1306,396 @@ def debug_geojson(request):
         """)
     except Exception as e:
         return HttpResponse(f"Error: {str(e)}")
+
+
+# ============================================
+# NOTIFICATION VIEWS (Feature 7)
+# ============================================
+
+@method_decorator(login_required, name='dispatch')
+class NotificationListView(ListView):
+    model = Notification
+    template_name = 'obstacle_compliance/notification_list.html'
+    context_object_name = 'notifications'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return Notification.objects.filter(user=self.request.user)
+
+
+@method_decorator(login_required, name='dispatch')
+class NotificationMarkReadView(View):
+    def post(self, request):
+        ids = request.POST.getlist('ids')
+        Notification.objects.filter(pk__in=ids, user=request.user).update(is_read=True)
+        return JsonResponse({'ok': True})
+
+    def get(self, request):
+        Notification.objects.filter(user=request.user, is_read=False).update(is_read=True)
+        return redirect('obstacle_compliance:notification_list')
+
+
+@method_decorator(login_required, name='dispatch')
+class UnreadCountView(View):
+    def get(self, request):
+        count = Notification.objects.filter(user=request.user, is_read=False).count()
+        return JsonResponse({'count': count})
+
+
+# ============================================
+# COMPLIANCE APPLICATION VIEWS (Feature 2)
+# ============================================
+
+@method_decorator(login_required, name='dispatch')
+class ApplicationListView(ListView):
+    model = ComplianceApplication
+    template_name = 'obstacle_compliance/application_list.html'
+    context_object_name = 'applications'
+    paginate_by = 10
+
+    def get_queryset(self):
+        qs = ComplianceApplication.objects.filter(user=self.request.user)
+        status = self.request.GET.get('status')
+        if status:
+            qs = qs.filter(status=status)
+        return qs
+
+
+@method_decorator(login_required, name='dispatch')
+class ApplicationCreateView(CreateView):
+    model = ComplianceApplication
+    template_name = 'obstacle_compliance/application_form.html'
+    fields = ['property', 'fee_paid']
+
+    def get_form(self):
+        form = super().get_form()
+        form.fields['property'].queryset = Property.objects.filter(user=self.request.user)
+        return form
+
+    def form_valid(self, form):
+        form.instance.user = self.request.user
+        response = super().form_valid(form)
+        Notification.objects.create(
+            user=self.request.user,
+            notification_type='application_update',
+            title='Application created',
+            message=f'Compliance application #{self.object.pk} has been created.',
+            link=reverse('obstacle_compliance:application_detail', args=[self.object.pk]),
+        )
+        return response
+
+    def get_success_url(self):
+        return reverse('obstacle_compliance:application_detail', args=[self.object.pk])
+
+
+@method_decorator(login_required, name='dispatch')
+class ApplicationDetailView(DetailView):
+    model = ComplianceApplication
+    template_name = 'obstacle_compliance/application_detail.html'
+    context_object_name = 'application'
+
+    def get_queryset(self):
+        return ComplianceApplication.objects.filter(user=self.request.user)
+
+
+@method_decorator(login_required, name='dispatch')
+class ApplicationSubmitView(View):
+    def post(self, request, pk):
+        app = get_object_or_404(ComplianceApplication, pk=pk, user=request.user)
+        try:
+            ApplicationWorkflow.transition(app, 'submitted')
+            messages.success(request, f'Application #{app.pk} submitted for review.')
+        except ValueError as e:
+            messages.error(request, str(e))
+        return redirect('obstacle_compliance:application_detail', pk=pk)
+
+
+# ============================================
+# BULK UPLOAD VIEWS (Feature 3)
+# ============================================
+
+@method_decorator(login_required, name='dispatch')
+class BulkUploadListView(ListView):
+    model = BulkUploadJob
+    template_name = 'obstacle_compliance/bulk_list.html'
+    context_object_name = 'jobs'
+    paginate_by = 10
+
+    def get_queryset(self):
+        return BulkUploadJob.objects.filter(user=self.request.user)
+
+
+@method_decorator(login_required, name='dispatch')
+class BulkUploadCreateView(CreateView):
+    model = BulkUploadJob
+    template_name = 'obstacle_compliance/bulk_form.html'
+    fields = ['csv_file']
+
+    def form_valid(self, form):
+        form.instance.user = self.request.user
+        response = super().form_valid(form)
+        messages.success(self.request, 'Bulk upload job queued. Processing will begin shortly.')
+        return response
+
+    def get_success_url(self):
+        return reverse('obstacle_compliance:bulk_list')
+
+
+@method_decorator(login_required, name='dispatch')
+class BulkUploadDetailView(DetailView):
+    model = BulkUploadJob
+    template_name = 'obstacle_compliance/bulk_detail.html'
+    context_object_name = 'job'
+
+    def get_queryset(self):
+        return BulkUploadJob.objects.filter(user=self.request.user)
+
+
+# ============================================
+# ANALYTICS DASHBOARD (Feature 5)
+# ============================================
+
+@method_decorator(login_required, name='dispatch')
+class AnalyticsDashboardView(LoginRequiredMixin, TemplateView):
+    template_name = 'obstacle_compliance/analytics.html'
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        user = self.request.user
+
+        total_properties = Property.objects.filter(user=user).count()
+        recent_checks = ComplianceCheck.objects.filter(property__user=user)[:5]
+        status_counts = ComplianceCheck.objects.filter(property__user=user)\
+            .values('status').annotate(count=Count('id'))
+        app_counts = ComplianceApplication.objects.filter(user=user)\
+            .values('status').annotate(count=Count('id'))
+        total_applications = ComplianceApplication.objects.filter(user=user).count()
+
+        aerodromes_total = Aerodrome.objects.count()
+        aerodromes_by_type = Aerodrome.objects.values('type').annotate(count=Count('id'))
+
+        ctx.update({
+            'total_properties': total_properties,
+            'recent_checks': recent_checks,
+            'status_counts': list(status_counts),
+            'app_counts': list(app_counts),
+            'total_applications': total_applications,
+            'aerodromes_total': aerodromes_total,
+            'aerodromes_by_type': list(aerodromes_by_type),
+        })
+        return ctx
+
+
+# ============================================
+# PERSONALIZED USER DASHBOARD (overrides generic)
+# ============================================
+
+class UserDashboardView(LoginRequiredMixin, TemplateView):
+    template_name = 'obstacle_compliance/user_dashboard.html'
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        user = self.request.user
+
+        properties = Property.objects.filter(user=user, is_active=True)
+        total_props = properties.count()
+        safe_props = properties.filter(last_status='GREEN').count()
+        warning_props = properties.filter(last_status='YELLOW').count()
+        hazard_props = properties.filter(last_status='RED').count()
+
+        recent_checks = ComplianceCheck.objects.filter(property__user=user).order_by('-checked_at')[:10]
+        unread_notifications = Notification.objects.filter(user=user, is_read=False)[:5]
+        recent_apps = ComplianceApplication.objects.filter(user=user)[:5]
+        pending_apps = ComplianceApplication.objects.filter(user=user, status__in=['submitted', 'under_review']).count()
+
+        # QS for status counts chart
+        status_qs = ComplianceCheck.objects.filter(property__user=user).values('status').annotate(count=Count('id'))
+        status_labels = [s['status'] for s in status_qs]
+        status_data = [s['count'] for s in status_qs]
+
+        ctx.update({
+            'total_properties': total_props,
+            'safe_properties': safe_props,
+            'warning_properties': warning_props,
+            'hazard_properties': hazard_props,
+            'recent_checks': recent_checks,
+            'unread_notifications': unread_notifications,
+            'recent_apps': recent_apps,
+            'pending_apps': pending_apps,
+            'properties': properties[:5],
+            'status_labels': status_labels,
+            'status_data': status_data,
+        })
+        return ctx
+
+
+# ============================================
+# KCAA ADMIN REVIEW DASHBOARD (Feature 2 gap)
+# ============================================
+
+@method_decorator(login_required, name='dispatch')
+class AdminApplicationListView(ListView):
+    model = ComplianceApplication
+    template_name = 'obstacle_compliance/admin_application_list.html'
+    context_object_name = 'applications'
+    paginate_by = 20
+
+    def get_queryset(self):
+        qs = ComplianceApplication.objects.all().select_related('property', 'user', 'reviewed_by')
+        status = self.request.GET.get('status')
+        if status:
+            qs = qs.filter(status=status)
+        return qs
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        labels = dict(ComplianceApplication.APP_STATUS_CHOICES)
+        ctx['counts'] = {
+            labels[s]: ComplianceApplication.objects.filter(status=s).count()
+            for s, _ in ComplianceApplication.APP_STATUS_CHOICES
+        }
+        return ctx
+
+
+@method_decorator(login_required, name='dispatch')
+class AdminApplicationDetailView(DetailView):
+    model = ComplianceApplication
+    template_name = 'obstacle_compliance/admin_application_detail.html'
+    context_object_name = 'application'
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['transitions'] = ApplicationWorkflow.TRANSITIONS.get(self.object.status, [])
+        return ctx
+
+
+@method_decorator(login_required, name='dispatch')
+class AdminApplicationActionView(View):
+    def post(self, request, pk, action):
+        app = get_object_or_404(ComplianceApplication, pk=pk)
+        approved = action == 'approve'
+        to_status = 'approved' if approved else 'rejected'
+        notes = request.POST.get('notes', '')
+
+        try:
+            ApplicationWorkflow.transition(app, to_status, user=request.user, notes=notes)
+            from .utils import generate_certificate_pdf
+            if approved:
+                try:
+                    generate_certificate_pdf(app)
+                    from datetime import date, timedelta
+                    app.valid_until = date.today() + timedelta(days=365)
+                    app.save(update_fields=['valid_until'])
+                except Exception as e:
+                    messages.error(request, f'PDF generation failed: {e}')
+
+            Notification.objects.create(
+                user=app.user,
+                notification_type='application_update',
+                title=f'Application #{app.pk} {approved and "approved" or "rejected"}',
+                message=notes or f'Your application has been {approved and "approved" or "rejected"}.',
+                link=reverse('obstacle_compliance:application_detail', args=[app.pk]),
+            )
+
+            from .utils import send_notification_email
+            try:
+                send_notification_email(Notification.objects.filter(user=app.user).latest('created_at'))
+            except Exception:
+                pass
+
+            messages.success(request, f'Application #{app.pk} {approved and "approved" or "rejected"}.')
+        except ValueError as e:
+            messages.error(request, str(e))
+
+        return redirect('obstacle_compliance:admin_application_detail', pk=pk)
+
+
+# ============================================
+# PUBLIC QUICK CHECK (no login required)
+# ============================================
+
+class QuickCheckView(TemplateView):
+    template_name = 'obstacle_compliance/quick_check.html'
+
+
+class QuickCheckAPI(View):
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+            lat = float(data.get('latitude'))
+            lon = float(data.get('longitude'))
+            height = float(data.get('height', 30))
+            point = Point(lon, lat, srid=4326)
+            result = ComplianceCalculator().evaluate_property_all_airports(point, height)
+            result['can_save'] = request.user.is_authenticated
+            return JsonResponse(result)
+        except (ValueError, TypeError, KeyError) as e:
+            return JsonResponse({'error': str(e)}, status=400)
+
+
+# ============================================
+# PROPERTIES GEOJSON (for map overlay)
+# ============================================
+
+class PropertiesGeoJSONView(LoginRequiredMixin, View):
+    def get(self, request):
+        properties = Property.objects.filter(user=request.user, is_active=True)
+        features = []
+        for p in properties:
+            status_color = {'GREEN': '#198754', 'YELLOW': '#ffc107', 'RED': '#dc3545'}.get(p.last_status, '#0d6efd')
+            features.append({
+                'type': 'Feature',
+                'geometry': {'type': 'Point', 'coordinates': [p.longitude, p.latitude]},
+                'properties': {
+                    'id': p.pk,
+                    'name': p.name,
+                    'status': p.last_status or 'UNCHECKED',
+                    'score': p.last_score,
+                    'height': p.height_m,
+                    'color': status_color,
+                    'last_checked': p.last_checked.isoformat() if p.last_checked else None,
+                    'url': reverse('obstacle_compliance:property_detail', args=[p.pk]),
+                }
+            })
+        return JsonResponse({'type': 'FeatureCollection', 'features': features})
+
+
+# ============================================
+# PROPERTIES CSV EXPORT
+# ============================================
+
+class PropertiesExportView(LoginRequiredMixin, View):
+    def get(self, request):
+        properties = Property.objects.filter(user=request.user, is_active=True)
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(['Name', 'Latitude', 'Longitude', 'Height (m)', 'Status', 'Score', 'Last Checked'])
+        for p in properties:
+            writer.writerow([
+                p.name, p.latitude, p.longitude, p.height_m,
+                p.last_status or 'UNCHECKED', p.last_score or '',
+                p.last_checked.isoformat() if p.last_checked else '',
+            ])
+        response = HttpResponse(buffer.getvalue(), content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="my_properties.csv"'
+        return response
+
+
+# ============================================
+# BULK UPLOAD PROCESS (trigger from UI)
+# ============================================
+
+@method_decorator(login_required, name='dispatch')
+class BulkUploadProcessView(View):
+    def post(self, request, pk):
+        job = get_object_or_404(BulkUploadJob, pk=pk, user=request.user)
+        if job.status != 'pending':
+            messages.error(request, f'Job {job.pk} is already {job.status}.')
+        else:
+            from .utils import process_bulk_upload
+            try:
+                process_bulk_upload(job)
+                messages.success(request, f'Bulk upload #{pk} processed: {job.success_count}/{job.total_rows} succeeded.')
+            except Exception as e:
+                messages.error(request, f'Processing failed: {e}')
+        return redirect('obstacle_compliance:bulk_detail', pk=pk)

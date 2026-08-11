@@ -4,3 +4,6 @@ from django.apps import AppConfig
 class ObstacleComplianceConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'obstacle_compliance'
+
+    def ready(self):
+        import obstacle_compliance.signals

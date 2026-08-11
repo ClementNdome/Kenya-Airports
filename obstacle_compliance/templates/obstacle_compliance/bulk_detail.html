@@ -1,0 +1,39 @@
+{% extends 'obstacle_compliance/base.html' %}
+{% block title %}Bulk Upload #{{ job.pk }}{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <div class="row justify-content-center">
+    <div class="col-md-8">
+      <div class="card">
+        <div class="card-header"><h4 class="mb-0"><i class="fas fa-upload me-2"></i>Bulk Upload #{{ job.pk }}</h4></div>
+        <div class="card-body">
+          <table class="table table-borderless">
+            <tr><th>Uploaded</th><td>{{ job.created_at|date:"Y-m-d H:i:s" }}</td></tr>
+            <tr><th>Status</th><td><span class="status-badge {{ job.status }}">{{ job.get_status_display }}</span></td></tr>
+            <tr><th>Total Rows</th><td>{{ job.total_rows }}</td></tr>
+            <tr><th>Processed</th><td>{{ job.processed_rows }}</td></tr>
+            <tr><th>Successful</th><td>{{ job.success_count }}</td></tr>
+            <tr><th>Warnings</th><td>{{ job.warning_count }}</td></tr>
+            <tr><th>Errors</th><td>{{ job.error_count }}</td></tr>
+            <tr><th>Completed</th><td>{{ job.completed_at|date:"Y-m-d H:i:s"|default:"—" }}</td></tr>
+          </table>
+          {% if job.error_log %}
+            <h5 class="mt-3">Error Log</h5>
+            <pre class="bg-light p-3 rounded" style="max-height:200px;overflow-y:auto;">{{ job.error_log }}</pre>
+          {% endif %}
+          {% if job.status == 'pending' %}
+            <form method="post" action="{% url 'obstacle_compliance:bulk_process' job.pk %}" style="display:inline;">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-success"><i class="fas fa-play me-1"></i>Process Now</button>
+            </form>
+          {% endif %}
+          {% if job.results_file %}
+            <a href="{{ job.results_file.url }}" class="btn btn-outline-success"><i class="fas fa-download me-1"></i>Download Results</a>
+          {% endif %}
+          <a href="{% url 'obstacle_compliance:bulk_list' %}" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-1"></i>Back</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

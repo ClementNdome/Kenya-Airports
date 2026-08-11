@@ -19,16 +19,16 @@ ALLOWED_HOSTS = ["*"]
 
 # enable this while working locally and ensure it is commnented while pushing to production
 # Configure GDAL (for Windows)
-# if os.name == 'nt':  # Only for Windows
-#     # Path to your GDAL DLL (adjust version if needed)
-#     GDAL_LIBRARY_PATH = r'C:\OSGeo4W\bin\gdal313.dll'
+if os.name == 'nt':  # Only for Windows
+    # Path to your GDAL DLL (adjust version if needed)
+    GDAL_LIBRARY_PATH = r'C:\OSGeo4W\bin\gdal313.dll'
     
-#     # Optional: Set other GDAL environment variables
-#     OSGEO4W_PATH = r'C:\OSGeo4W'
-#     os.environ['OSGEO4W_ROOT'] = OSGEO4W_PATH
-#     os.environ['GDAL_DATA'] = os.path.join(OSGEO4W_PATH, 'share', 'gdal')
-#     os.environ['PROJ_LIB'] = os.path.join(OSGEO4W_PATH, 'share', 'proj')
-#     os.environ['PATH'] = OSGEO4W_PATH + r'\bin;' + os.environ['PATH']
+    # Optional: Set other GDAL environment variables
+    OSGEO4W_PATH = r'C:\OSGeo4W'
+    os.environ['OSGEO4W_ROOT'] = OSGEO4W_PATH
+    os.environ['GDAL_DATA'] = os.path.join(OSGEO4W_PATH, 'share', 'gdal')
+    os.environ['PROJ_LIB'] = os.path.join(OSGEO4W_PATH, 'share', 'proj')
+    os.environ['PATH'] = OSGEO4W_PATH + r'\bin;' + os.environ['PATH']
 
 # Application definition
 
@@ -44,7 +44,10 @@ INSTALLED_APPS = [
     "airports_strips",
     "leaflet",
     'obstacle_compliance', #newapp
-    # 'djangorestframework-gis',
+    'rest_framework',
+    'rest_framework.authtoken',
+    'drf_spectacular',
+    'django_filters',
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -107,17 +110,7 @@ DATABASES = {
 #         conn_max_age=600,
 #     )
 
-# local database for local testing
-# DATABASES = {
-#     "default": {
-#         "ENGINE": "django.contrib.gis.db.backends.postgis",
-#         "NAME": "airport_db",
-#         "USER": "postgres",
-#         "HOST": "localhost",
-#         "PASSWORD": "0323",
-#         "PORT": "5432",
-#     }
-# }
+
 
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -163,6 +156,19 @@ STATICFILES_DIRS = [
 # GDAL_LIBRARY_PATH = os.environ.get("GDAL_LIBRARY_PATH", "C:/OSGeo4W/bin/gdal310.dll")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Authentication configuration
+LOGIN_URL = '/obstacle-compliance/accounts/login/'
+LOGIN_REDIRECT_URL = '/obstacle-compliance/dashboard/'
+LOGOUT_REDIRECT_URL = '/obstacle-compliance/'
+
+# Email configuration
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+DEFAULT_FROM_EMAIL = ''
+SITE_URL = 'http://127.0.0.1:8000'
+
+# Password reset
+PASSWORD_RESET_TIMEOUT = 86400  # 24 hours
 
 # Leaflet configuration
 LEAFLET_CONFIG = {
@@ -214,4 +220,36 @@ JAZZMIN_SETTINGS = {
         "gis_system",  # Your app
         "auth",  # Authentication app
     ],
+}
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend',
+        'rest_framework.filters.SearchFilter',
+        'rest_framework.filters.OrderingFilter',
+    ],
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'user': '100/hour',
+    },
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 50,
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'KCAA Obstacle Compliance API',
+    'DESCRIPTION': 'API for checking property compliance with KCAA obstacle limitation surfaces around Kenyan aerodromes.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'CONTACT': {'email': 'support@kcaa.or.ke'},
 }

@@ -1,0 +1,144 @@
+{% extends 'obstacle_compliance/base.html' %}
+{% block title %}Analytics Dashboard{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h2 class="mb-4"><i class="fas fa-chart-bar me-2"></i>Analytics Dashboard</h2>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="stat-card">
+        <div class="value">{{ total_properties }}</div>
+        <div class="label">My Properties</div>
+        <div class="icon"><i class="fas fa-building"></i></div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="stat-card">
+        <div class="value">{{ total_applications }}</div>
+        <div class="label">Applications</div>
+        <div class="icon"><i class="fas fa-file-alt"></i></div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="stat-card">
+        <div class="value">{{ aerodromes_total }}</div>
+        <div class="label">Aerodromes (Total)</div>
+        <div class="icon"><i class="fas fa-plane"></i></div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="stat-card">
+        <div class="value">{{ status_counts|length }}</div>
+        <div class="label">Status Categories</div>
+        <div class="icon"><i class="fas fa-tags"></i></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header"><h5 class="mb-0"><i class="fas fa-check-circle me-1"></i>Compliance Status Breakdown</h5></div>
+        <div class="card-body">
+          {% if status_counts %}
+            <canvas id="statusChart" height="250"></canvas>
+          {% else %}
+            <p class="text-muted">No compliance checks yet.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header"><h5 class="mb-0"><i class="fas fa-file-alt me-1"></i>Application Status</h5></div>
+        <div class="card-body">
+          {% if app_counts %}
+            <canvas id="appChart" height="250"></canvas>
+          {% else %}
+            <p class="text-muted">No applications yet.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mt-2">
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header"><h5 class="mb-0"><i class="fas fa-plane me-1"></i>Aerodromes by Type</h5></div>
+        <div class="card-body">
+          {% if aerodromes_by_type %}
+            <canvas id="typeChart" height="250"></canvas>
+          {% else %}
+            <p class="text-muted">No aerodrome data.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header"><h5 class="mb-0"><i class="fas fa-history me-1"></i>Recent Checks</h5></div>
+        <div class="card-body">
+          {% if recent_checks %}
+            <ul class="list-group list-group-flush">
+              {% for c in recent_checks %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                  {{ c.property.name }}
+                  <span class="status-badge {{ c.get_status_display|lower }}">{{ c.get_status_display }}</span>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="text-muted">No recent checks.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  {% if status_counts %}
+    new Chart(document.getElementById('statusChart'), {
+      type: 'doughnut',
+      data: {
+        labels: [{% for s in status_counts %}'{{ s.status }}'{% if not forloop.last %},{% endif %}{% endfor %}],
+        datasets: [{
+          data: [{% for s in status_counts %}{{ s.count }}{% if not forloop.last %},{% endif %}{% endfor %}],
+          backgroundColor: ['#198754','#ffc107','#dc3545','#0d6efd']
+        }]
+      }
+    });
+  {% endif %}
+  {% if app_counts %}
+    new Chart(document.getElementById('appChart'), {
+      type: 'pie',
+      data: {
+        labels: [{% for a in app_counts %}'{{ a.status }}'{% if not forloop.last %},{% endif %}{% endfor %}],
+        datasets: [{
+          data: [{% for a in app_counts %}{{ a.count }}{% if not forloop.last %},{% endif %}{% endfor %}],
+          backgroundColor: ['#6f42c1','#0d6efd','#ffc107','#198754','#dc3545']
+        }]
+      }
+    });
+  {% endif %}
+  {% if aerodromes_by_type %}
+    new Chart(document.getElementById('typeChart'), {
+      type: 'bar',
+      data: {
+        labels: [{% for a in aerodromes_by_type %}'{{ a.type }}'{% if not forloop.last %},{% endif %}{% endfor %}],
+        datasets: [{
+          label: 'Count',
+          data: [{% for a in aerodromes_by_type %}{{ a.count }}{% if not forloop.last %},{% endif %}{% endfor %}],
+          backgroundColor: '#0d6efd'
+        }]
+      },
+      options: { scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+    });
+  {% endif %}
+});
+</script>
+{% endblock %}

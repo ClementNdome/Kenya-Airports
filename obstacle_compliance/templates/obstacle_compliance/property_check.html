@@ -261,6 +261,15 @@
             <button class="btn btn-outline-secondary" id="shareResults">
                 <i class="fas fa-share-alt me-2"></i>Share
             </button>
+            {% if user.is_authenticated %}
+            <button class="btn btn-outline-primary" id="saveProperty" style="display:none;">
+                <i class="fas fa-save me-2"></i>Save to My Properties
+            </button>
+            {% else %}
+            <small class="d-block mt-2 text-muted">
+                <a href="{% url 'obstacle_compliance:login' %}">Login</a> to save this property and track compliance changes.
+            </small>
+            {% endif %}
         </div>
     </div>
 </template>
@@ -335,15 +344,15 @@
             showToast('Please enter an address', 'warning');
             return;
         }
-        
         showLoading(document.getElementById('geocodeBtn'));
-        
+
         fetch(`/obstacle-compliance/api/geocode/?address=${encodeURIComponent(address)}`)
             .then(response => response.json())
             .then(data => {
-                if (data.lat && data.lon) {
-                    updateCoordinates(data.lat, data.lon);
-                    showToast('Location found', 'success');
+                if (data.results && data.results.length > 0) {
+                    const best = data.results[0];
+                    updateCoordinates(best.lat, best.lon);
+                    showToast(`Found: ${best.display_name}`, 'success');
                 } else {
                     showToast('Address not found', 'warning');
                 }
@@ -458,6 +467,48 @@
         
         // Add event listeners for buttons
         document.getElementById('downloadReport').addEventListener('click', downloadReport);
+        
+        // Show and bind save button
+        const saveBtn = document.getElementById('saveProperty');
+        if (saveBtn) {
+            saveBtn.style.display = 'inline-block';
+            saveBtn.addEventListener('click', saveProperty);
+        }
+    }
+    
+    function saveProperty() {
+        const lat = document.getElementById('latitude').value;
+        const lon = document.getElementById('longitude').value;
+        const height = document.getElementById('height').value;
+        const btn = document.getElementById('saveProperty');
+        
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
+        
+        fetch('/obstacle-compliance/api/save-property/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+            },
+            body: JSON.stringify({ lat, lon, height }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'created') {
+                showToast('Property saved to your portfolio!', 'success');
+                btn.innerHTML = '<i class="fas fa-check me-2"></i>Saved';
+            } else {
+                showToast('Error saving property', 'error');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-save me-2"></i>Save to My Properties';
+            }
+        })
+        .catch(() => {
+            showToast('Error saving property', 'error');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-save me-2"></i>Save to My Properties';
+        });
     }
     
     function downloadReport() {

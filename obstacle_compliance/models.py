@@ -31,6 +31,18 @@ class Aerodrome(models.Model):
     admin_website = models.URLField(max_length=200, blank=True, null=True)
     geom = models.PointField(srid=4326)
 
+    # Data Unification fields (from airports_strips.Airports)
+    iata_code = models.CharField(max_length=10, null=True, blank=True)
+    runway_length_m = models.FloatField(null=True, blank=True, help_text="Runway length in meters")
+    nearest_city = models.CharField(max_length=254, null=True, blank=True)
+    airlines = models.TextField(null=True, blank=True, help_text="Operating airlines")
+    source = models.CharField(
+        max_length=50,
+        choices=[('geojson', 'KCAA GeoJSON'), ('geopackage', 'OurAirports GPKG'), ('merged', 'Merged')],
+        default='geojson',
+    )
+    last_synced = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         verbose_name = "Aerodrome"
         verbose_name_plural = "Aerodromes"
@@ -232,3 +244,228 @@ class AerodromeBuffer(models.Model):
 
     def __str__(self):
         return f"{self.aerodrome.icao_code} - {self.radius_km}km Buffer"
+
+
+# ============================================
+# USER & PORTFOLIO MODELS (Feature 1)
+# ============================================
+
+from django.contrib.auth.models import User
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+STATUS_CHOICES = [
+    ('GREEN', 'Compliant'),
+    ('YELLOW', 'Caution - Within Regulatory Zone'),
+    ('RED', 'Hazard Detected'),
+    ('UNKNOWN', 'Not Checked'),
+]
+
+
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    company = models.CharField(max_length=255, blank=True)
+    phone = models.CharField(max_length=20, blank=True)
+    organization_type = models.CharField(
+        max_length=50,
+        choices=[
+            ('developer', 'Property Developer'),
+            ('architect', 'Architect / Engineer'),
+            ('agent', 'Real Estate Agent'),
+            ('public', 'General Public'),
+            ('kcaa', 'KCAA Regulator'),
+            ('other', 'Other'),
+        ],
+        default='public',
+    )
+    email_verified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user.username}'s Profile"
+
+
+@receiver(post_save, sender=User)
+def create_user_profile(sender, instance, created, **kwargs):
+    if created:
+        UserProfile.objects.create(user=instance)
+
+
+class Property(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='properties')
+    name = models.CharField(max_length=255, help_text="e.g., 'Sunset Towers'")
+    address = models.TextField(blank=True)
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    height_m = models.FloatField(help_text="Height in meters AGL")
+    geom = models.PointField(srid=4326, null=True, blank=True)
+    parcel_boundary = models.MultiPolygonField(srid=4326, null=True, blank=True)
+
+    last_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='UNKNOWN')
+    last_score = models.FloatField(null=True, blank=True)
+    last_checked = models.DateTimeField(null=True, blank=True)
+
+    notes = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = 'Properties'
+        ordering = ['-updated_at']
+        indexes = [
+            models.Index(fields=['user', 'last_status']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.user.username})"
+
+    def save(self, *args, **kwargs):
+        from django.contrib.gis.geos import Point
+        if self.latitude and self.longitude:
+            self.geom = Point(self.longitude, self.latitude, srid=4326)
+        super().save(*args, **kwargs)
+
+    def run_compliance_check(self):
+        from .utils import ComplianceCalculator
+        from django.contrib.gis.geos import Point
+
+        calculator = ComplianceCalculator()
+        point = Point(self.longitude, self.latitude, srid=4326)
+        result = calculator.evaluate_property_all_airports(point, self.height_m)
+
+        check = ComplianceCheck.objects.create(
+            property=self,
+            result_json=result,
+            status=result.get('status', 'UNKNOWN'),
+            score=result.get('compliance_score', 0),
+            primary_airport_icao=result.get('primary_airport', {}).get('icao', ''),
+            airports_affected=result.get('airports_affected_count', 0),
+            requires_lighting=result.get('requires_lighting', False),
+            is_hazard=result.get('is_hazard', False),
+            trigger='manual',
+        )
+
+        self.last_status = check.status
+        self.last_score = check.score
+        self.last_checked = check.checked_at
+        self.save(update_fields=['last_status', 'last_score', 'last_checked'])
+
+        return check
+
+
+class ComplianceCheck(models.Model):
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='checks')
+    result_json = models.JSONField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    score = models.FloatField()
+    primary_airport_icao = models.CharField(max_length=10, null=True, blank=True)
+    airports_affected = models.IntegerField(default=0)
+    requires_lighting = models.BooleanField(default=False)
+    is_hazard = models.BooleanField(default=False)
+    checked_at = models.DateTimeField(auto_now_add=True)
+    trigger = models.CharField(
+        max_length=20,
+        choices=[
+            ('manual', 'Manual Check'),
+            ('auto', 'Automatic Re-assessment'),
+            ('bulk', 'Bulk Upload'),
+        ],
+        default='manual',
+    )
+
+    class Meta:
+        ordering = ['-checked_at']
+
+    def __str__(self):
+        return f"{self.property.name} @ {self.checked_at.strftime('%Y-%m-%d %H:%M')} — {self.status}"
+
+
+class Notification(models.Model):
+    NOTIFICATION_TYPES = [
+        ('status_change', 'Compliance Status Changed'),
+        ('regulation_update', 'Regulation Updated'),
+        ('application_update', 'Application Status Changed'),
+        ('reassessment', 'Automatic Re-assessment Complete'),
+        ('bulk_complete', 'Bulk Upload Complete'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    notification_type = models.CharField(max_length=30, choices=NOTIFICATION_TYPES)
+    title = models.CharField(max_length=255)
+    message = models.TextField()
+    link = models.CharField(max_length=255, blank=True, help_text="Relative URL to related page")
+    is_read = models.BooleanField(default=False)
+    email_sent = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'is_read']),
+        ]
+
+    def __str__(self):
+        return f"[{self.get_notification_type_display()}] {self.title}"
+
+
+class ComplianceApplication(models.Model):
+    APP_STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('submitted', 'Submitted'),
+        ('under_review', 'Under Review'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+        ('revoked', 'Revoked'),
+    ]
+
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='applications')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='applications')
+    status = models.CharField(max_length=20, choices=APP_STATUS_CHOICES, default='draft')
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_applications')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewer_notes = models.TextField(blank=True)
+    certificate_number = models.CharField(max_length=50, unique=True, null=True, blank=True)
+    certificate_pdf = models.FileField(upload_to='certificates/', null=True, blank=True)
+    valid_until = models.DateField(null=True, blank=True)
+    fee_paid = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'status']),
+            models.Index(fields=['certificate_number']),
+        ]
+
+    def __str__(self):
+        return f"App #{self.pk} — {self.property.name} ({self.get_status_display()})"
+
+
+class BulkUploadJob(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='bulk_uploads')
+    csv_file = models.FileField(upload_to='bulk_uploads/')
+    status = models.CharField(max_length=20, choices=[
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    ], default='pending')
+    total_rows = models.IntegerField(default=0)
+    processed_rows = models.IntegerField(default=0)
+    success_count = models.IntegerField(default=0)
+    warning_count = models.IntegerField(default=0)
+    error_count = models.IntegerField(default=0)
+    results_file = models.FileField(upload_to='bulk_results/', null=True, blank=True)
+    error_log = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Bulk #{self.pk} — {self.status} ({self.success_count}/{self.total_rows})"

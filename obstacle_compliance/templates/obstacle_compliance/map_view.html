@@ -500,6 +500,11 @@
                 <button class="control-btn" id="toggleBuffers">
                     <i class="fas fa-draw-polygon"></i> Buffers
                 </button>
+                {% if user.is_authenticated %}
+                <button class="control-btn" id="toggleProperties">
+                    <i class="fas fa-building"></i> My Props
+                </button>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -560,10 +565,12 @@
         // Layer groups
         var airportLayer = L.layerGroup().addTo(map);
         var bufferLayer = L.layerGroup().addTo(map);
+        var propertiesLayer = L.layerGroup();
         
         // Load initial data
         loadAirports();
         loadBuffers(15);
+        {% if user.is_authenticated %}loadMyProperties();{% endif %}
         
         // Hide loading after map loads
         map.whenReady(function() {
@@ -685,6 +692,21 @@
                 map.removeLayer(bufferLayer);
             }
         });
+        
+        {% if user.is_authenticated %}
+        var toggleProperties = document.getElementById('toggleProperties');
+        if (toggleProperties) {
+            toggleProperties.addEventListener('click', function() {
+                this.classList.toggle('active');
+                if (this.classList.contains('active')) {
+                    map.addLayer(propertiesLayer);
+                    loadMyProperties();
+                } else {
+                    map.removeLayer(propertiesLayer);
+                }
+            });
+        }
+        {% endif %}
         
         // ============================================
         // AIRPORT SEARCH
@@ -909,6 +931,57 @@
         }
         
         // ============================================
+        // MY PROPERTIES LAYER
+        // ============================================
+        
+        {% if user.is_authenticated %}
+        function loadMyProperties() {
+            fetch('{% url "obstacle_compliance:api_my_properties_geojson" %}')
+                .then(r => r.json())
+                .then(data => {
+                    if (map.hasLayer(propertiesLayer)) {
+                        map.removeLayer(propertiesLayer);
+                    }
+                    propertiesLayer = L.layerGroup();
+                    
+                    L.geoJSON(data, {
+                        pointToLayer: function(feature, latlng) {
+                            var props = feature.properties || {};
+                            var color = props.color || '#0d6efd';
+                            var size = props.status === 'UNCHECKED' ? 8 : 12;
+                            
+                            return L.marker(latlng, {
+                                icon: L.divIcon({
+                                    className: 'custom-property-marker',
+                                    html: `<div style="background-color: ${color}; width: ${size}px; height: ${size}px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
+                                    iconSize: [size, size],
+                                    iconAnchor: [size/2, size/2]
+                                })
+                            });
+                        },
+                        onEachFeature: function(feature, layer) {
+                            var props = feature.properties || {};
+                            layer.bindPopup(`
+                                <div style="min-width: 180px;">
+                                    <h6 style="margin-bottom: 5px;">${props.name}</h6>
+                                    <p style="margin-bottom: 3px; font-size: 12px;">
+                                        <strong>Status:</strong> <span style="color:${props.color}">${props.status}</span><br>
+                                        <strong>Score:</strong> ${props.score || 'N/A'}<br>
+                                        <strong>Height:</strong> ${props.height || 'N/A'}m
+                                    </p>
+                                    <a href="${props.url}" class="btn btn-sm btn-primary" style="padding:2px 8px;font-size:11px;text-decoration:none;color:white;">Details</a>
+                                </div>
+                            `);
+                        }
+                    }).addTo(propertiesLayer);
+                    
+                    propertiesLayer.addTo(map);
+                })
+                .catch(err => console.error('Error loading properties:', err));
+        }
+        {% endif %}
+
+        // ============================================
         // COORDINATES DISPLAY
         // ============================================
         
@@ -949,6 +1022,10 @@
         
         document.getElementById('toggleAirports').classList.add('active');
         document.getElementById('toggleBuffers').classList.add('active');
+        {% if user.is_authenticated %}
+        var tp = document.getElementById('toggleProperties');
+        if (tp) tp.classList.add('active');
+        {% endif %}
     });
 </script>
 {% endblock %}

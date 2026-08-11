@@ -227,11 +227,19 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
+                    {% if user.is_authenticated %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'obstacle_compliance:user_dashboard' %}">
+                            <i class="fas fa-home me-1"></i> Dashboard
+                        </a>
+                    </li>
+                    {% else %}
                     <li class="nav-item">
                         <a class="nav-link" href="{% url 'obstacle_compliance:dashboard' %}">
                             <i class="fas fa-home me-1"></i> Dashboard
                         </a>
                     </li>
+                    {% endif %}
                     <li class="nav-item">
                         <a class="nav-link" href="{% url 'obstacle_compliance:map_view' %}">
                             <i class="fas fa-map me-1"></i> Interactive Map
@@ -239,9 +247,62 @@
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="{% url 'obstacle_compliance:property_check' %}">
-                            <i class="fas fa-building me-1"></i> <em>coming soon property comp.</em>
+                            <i class="fas fa-building me-1"></i> Property Check
                         </a>
                     </li>
+                    {% if user.is_authenticated %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'obstacle_compliance:property_list' %}">
+                            <i class="fas fa-list me-1"></i> My Properties
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'obstacle_compliance:application_list' %}">
+                            <i class="fas fa-file-alt me-1"></i> Applications
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'obstacle_compliance:bulk_list' %}">
+                            <i class="fas fa-upload me-1"></i> Bulk Upload
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'obstacle_compliance:analytics' %}">
+                            <i class="fas fa-chart-bar me-1"></i> Analytics
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link position-relative" href="{% url 'obstacle_compliance:notification_list' %}">
+                            <i class="fas fa-bell me-1"></i> Notifications
+                            <span id="unread-badge" class="badge rounded-pill bg-danger position-absolute top-0 start-100 translate-middle" style="font-size:0.6rem;">0</span>
+                        </a>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-user me-1"></i> {{ user.username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{% url 'obstacle_compliance:profile' %}">
+                                <i class="fas fa-cog me-2"></i>Profile</a>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{% url 'obstacle_compliance:logout' %}">
+                                <i class="fas fa-sign-out-alt me-2"></i>Logout</a>
+                            </li>
+                        </ul>
+                    </li>
+                    {% else %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'obstacle_compliance:login' %}">
+                            <i class="fas fa-sign-in-alt me-1"></i> Login
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'obstacle_compliance:register' %}">
+                            <i class="fas fa-user-plus me-1"></i> Register
+                        </a>
+                    </li>
+                    {% endif %}
                 </ul>
             </div>
         </div>
@@ -278,6 +339,27 @@
     <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     
+    <!-- Unread Notification Polling -->
+    <script>
+        function updateUnreadCount() {
+            fetch('/notifications/unread-count/')
+                .then(r => r.json())
+                .then(d => {
+                    const badge = document.getElementById('unread-badge');
+                    if (badge) {
+                        badge.textContent = d.count;
+                        badge.style.display = d.count > 0 ? 'inline' : 'none';
+                    }
+                });
+        }
+        {% if user.is_authenticated %}
+        document.addEventListener('DOMContentLoaded', function() {
+            updateUnreadCount();
+            setInterval(updateUnreadCount, 15000);
+        });
+        {% endif %}
+    </script>
+
     <!-- Custom JavaScript -->
     <script>
         // Your existing JavaScript remains the same

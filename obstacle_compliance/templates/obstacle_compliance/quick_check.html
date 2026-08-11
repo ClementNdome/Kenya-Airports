@@ -1,0 +1,136 @@
+{% extends 'obstacle_compliance/base.html' %}
+{% load static %}
+{% block title %}Quick Property Check{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <div class="row justify-content-center">
+    <div class="col-md-8">
+      <div class="card">
+        <div class="card-header">
+          <h4 class="mb-0"><i class="fas fa-building me-2"></i>Quick Compliance Check</h4>
+          <small class="text-muted">No registration required. Enter coordinates to check obstacle compliance.</small>
+        </div>
+        <div class="card-body">
+          <form id="quickCheckForm">
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label">Latitude</label>
+                <input type="number" step="any" name="latitude" class="form-control" placeholder="-1.2864" required>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Longitude</label>
+                <input type="number" step="any" name="longitude" class="form-control" placeholder="36.8172" required>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Height (m)</label>
+                <input type="number" name="height" class="form-control" value="30" min="0" step="1">
+              </div>
+            </div>
+            <div class="mt-3">
+              <button type="submit" class="btn btn-primary" id="checkBtn">
+                <i class="fas fa-search me-1"></i>Check Compliance
+              </button>
+              <button type="button" class="btn btn-outline-secondary" onclick="getLocation()">
+                <i class="fas fa-crosshairs me-1"></i>Use My Location
+              </button>
+            </div>
+          </form>
+
+          <div id="resultArea" class="mt-4" style="display:none;">
+            <hr>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <h5>Result</h5>
+                <div id="statusBadge"></div>
+                <div id="scoreDisplay" class="mt-2"></div>
+                <div id="detailsDisplay" class="mt-2"></div>
+              </div>
+              <div class="col-md-6" id="saveCta" style="display:none;">
+                <div class="alert alert-info">
+                  <h6><i class="fas fa-user-plus me-1"></i>Want to save this?</h6>
+                  <p class="small mb-2">Register or log in to save properties, track changes, and apply for compliance certificates.</p>
+                  <a href="{% url 'obstacle_compliance:register' %}" class="btn btn-sm btn-primary">Register</a>
+                  <a href="{% url 'obstacle_compliance:login' %}" class="btn btn-sm btn-outline-primary">Log In</a>
+                </div>
+              </div>
+            </div>
+            <div id="mapPreview" style="height: 250px;" class="mt-2 rounded border"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script>
+let resultMap;
+
+function getLocation() {
+  if (!navigator.geolocation) { showToast('Geolocation not supported', 'error'); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      document.querySelector('[name="latitude"]').value = pos.coords.latitude.toFixed(6);
+      document.querySelector('[name="longitude"]').value = pos.coords.longitude.toFixed(6);
+      showToast('Location acquired', 'success');
+    },
+    () => showToast('Could not get location', 'error')
+  );
+}
+
+document.getElementById('quickCheckForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  const btn = document.getElementById('checkBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Checking...';
+
+  const data = {
+    latitude: parseFloat(this.latitude.value),
+    longitude: parseFloat(this.longitude.value),
+    height: parseFloat(this.height.value) || 30,
+  };
+
+  fetch('{% url "obstacle_compliance:api_quick_check" %}', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+    body: JSON.stringify(data),
+  })
+  .then(r => r.json())
+  .then(result => {
+    document.getElementById('resultArea').style.display = 'block';
+    const badge = document.getElementById('statusBadge');
+    const scoreDiv = document.getElementById('scoreDisplay');
+    const details = document.getElementById('detailsDisplay');
+
+    badge.innerHTML = `<span class="status-badge ${result.status ? result.status.toLowerCase() : 'info'}" style="font-size:1rem;padding:0.5rem 1rem;">${result.status || 'UNKNOWN'}</span>`;
+    scoreDiv.innerHTML = `<strong>Compliance Score:</strong> ${(result.compliance_score || 0).toFixed(1)}%`;
+    details.innerHTML = `
+      <p class="mb-1 small">${result.message || ''}</p>
+      <p class="mb-1 small"><strong>Affected Airports:</strong> ${result.airports_affected_count || 0}</p>
+      <p class="mb-0 small"><strong>Hazard:</strong> ${result.is_hazard ? 'Yes ⚠️' : 'No ✅'}</p>
+    `;
+
+    if (result.can_save) {
+      document.getElementById('saveCta').style.display = 'block';
+    } else {
+      document.getElementById('saveCta').style.display = 'block';
+    }
+
+    if (resultMap) resultMap.remove();
+    resultMap = L.map('mapPreview').setView([data.latitude, data.longitude], 13);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(resultMap);
+    L.marker([data.latitude, data.longitude]).addTo(resultMap)
+      .bindPopup(`<b>${data.latitude}, ${data.longitude}</b><br>Height: ${data.height}m`);
+    setTimeout(() => resultMap.invalidateSize(), 200);
+  })
+  .catch(err => { showToast('Error: ' + err.message, 'error'); })
+  .finally(() => {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-search me-1"></i>Check Compliance';
+  });
+});
+</script>
+{% endblock %}
