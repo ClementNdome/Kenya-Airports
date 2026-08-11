@@ -6,6 +6,7 @@ import logging
 import io
 import hashlib
 from datetime import datetime
+from urllib.parse import quote
 
 import requests
 from xhtml2pdf import pisa
@@ -855,9 +856,12 @@ class SearchView(View):
 
 class GeocodeView(View):
     """
-    Geocode an address to lat/lon using OpenStreetMap Nominatim.
+    Geocode an address to lat/lon using the Mapbox Geocoding API,
+    falling back to OpenStreetMap Nominatim when Mapbox is unavailable.
     GET /api/geocode/?address=Nairobi
     """
+    MAPBOX_URL = 'https://api.mapbox.com/geocoding/v5/mapbox.places/{query}.json'
+    MAPBOX_TYPES = 'address,place,locality,neighborhood,district,poi'
     NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search'
     USER_AGENT = 'KCAAObstacleCompliance/1.0'
     CACHE_DURATION = 86400
@@ -872,6 +876,58 @@ class GeocodeView(View):
         if cached:
             return JsonResponse(cached)
 
+        suggestions = self._geocode_mapbox(address)
+        if suggestions is None:
+            suggestions = self._geocode_nominatim(address)
+
+        if suggestions is None:
+            return JsonResponse({'error': 'Geocoding service unavailable'}, status=503)
+        if not suggestions:
+            return JsonResponse({'error': 'Address not found'}, status=404)
+
+        response_data = {'results': suggestions}
+        cache.set(cache_key, response_data, self.CACHE_DURATION)
+        return JsonResponse(response_data)
+
+    def _geocode_mapbox(self, address):
+        """Geocode using Mapbox. Returns a normalized list or None on failure."""
+        token = getattr(settings, 'MAPBOX_ACCESS_TOKEN', '')
+        if not token:
+            return None
+
+        try:
+            resp = requests.get(
+                self.MAPBOX_URL.format(query=quote(address)),
+                params={
+                    'access_token': token,
+                    'country': 'ke',
+                    'limit': 5,
+                    'types': self.MAPBOX_TYPES,
+                    'language': 'en',
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            features = resp.json().get('features', [])
+
+            suggestions = []
+            for f in features:
+                center = f.get('center') or [0, 0]
+                suggestions.append({
+                    'lat': float(center[1]),
+                    'lon': float(center[0]),
+                    'display_name': f.get('place_name', ''),
+                    'text': f.get('text', ''),
+                    'type': (f.get('place_type') or ['place'])[0],
+                })
+            return suggestions
+
+        except requests.RequestException as e:
+            logger.error(f"Mapbox geocoding error: {e}")
+            return None
+
+    def _geocode_nominatim(self, address):
+        """Geocode using OpenStreetMap Nominatim. Returns a normalized list or None on failure."""
         params = {
             'q': address,
             'format': 'json',
@@ -886,32 +942,29 @@ class GeocodeView(View):
             resp.raise_for_status()
             results = resp.json()
 
-            if not results:
-                return JsonResponse({'error': 'Address not found'}, status=404)
-
             suggestions = []
             for r in results:
                 suggestions.append({
                     'lat': float(r['lat']),
                     'lon': float(r['lon']),
                     'display_name': r.get('display_name', ''),
+                    'text': r.get('display_name', ''),
                     'type': r.get('type', ''),
                 })
-
-            response_data = {'results': suggestions}
-            cache.set(cache_key, response_data, self.CACHE_DURATION)
-            return JsonResponse(response_data)
+            return suggestions
 
         except requests.RequestException as e:
             logger.error(f"Geocoding error: {e}")
-            return JsonResponse({'error': 'Geocoding service unavailable'}, status=503)
+            return None
 
 
 class ReverseGeocodeView(View):
     """
-    Reverse geocode lat/lon to address.
+    Reverse geocode lat/lon to address using the Mapbox Geocoding API,
+    falling back to OpenStreetMap Nominatim when Mapbox is unavailable.
     GET /api/reverse-geocode/?lat=-1.2864&lon=36.8172
     """
+    MAPBOX_URL = 'https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json'
     NOMINATIM_URL = 'https://nominatim.openstreetmap.org/reverse'
     USER_AGENT = 'KCAAObstacleCompliance/1.0'
     CACHE_DURATION = 86400
@@ -928,6 +981,53 @@ class ReverseGeocodeView(View):
         if cached:
             return JsonResponse(cached)
 
+        result = self._reverse_mapbox(lat, lon)
+        if result is None:
+            result = self._reverse_nominatim(lat, lon)
+
+        if result is None:
+            return JsonResponse({'error': 'Geocoding service unavailable'}, status=503)
+
+        cache.set(cache_key, result, self.CACHE_DURATION)
+        return JsonResponse(result)
+
+    def _reverse_mapbox(self, lat, lon):
+        """Reverse geocode using Mapbox. Returns a normalized dict or None on failure."""
+        token = getattr(settings, 'MAPBOX_ACCESS_TOKEN', '')
+        if not token:
+            return None
+
+        try:
+            resp = requests.get(
+                self.MAPBOX_URL.format(lon=lon, lat=lat),
+                params={'access_token': token, 'language': 'en', 'limit': 1},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            features = resp.json().get('features', [])
+            if not features:
+                return {'display_name': '', 'address': {}, 'lat': lat, 'lon': lon}
+
+            f = features[0]
+            address = {}
+            for ctx in f.get('context', []):
+                cid = ctx.get('id', '')
+                key = cid.split('.')[0] if '.' in cid else 'context'
+                address[key] = ctx.get('text', '')
+
+            return {
+                'display_name': f.get('place_name', ''),
+                'address': address,
+                'lat': lat,
+                'lon': lon,
+            }
+
+        except requests.RequestException as e:
+            logger.error(f"Mapbox reverse geocoding error: {e}")
+            return None
+
+    def _reverse_nominatim(self, lat, lon):
+        """Reverse geocode using OpenStreetMap Nominatim. Returns a normalized dict or None on failure."""
         params = {
             'lat': lat,
             'lon': lon,
@@ -941,18 +1041,16 @@ class ReverseGeocodeView(View):
             resp.raise_for_status()
             data = resp.json()
 
-            result = {
+            return {
                 'display_name': data.get('display_name', ''),
                 'address': data.get('address', {}),
                 'lat': float(data['lat']),
                 'lon': float(data['lon']),
             }
-            cache.set(cache_key, result, self.CACHE_DURATION)
-            return JsonResponse(result)
 
-        except requests.RequestException as e:
+        except (requests.RequestException, KeyError, ValueError) as e:
             logger.error(f"Reverse geocoding error: {e}")
-            return JsonResponse({'error': 'Geocoding service unavailable'}, status=503)
+            return None
 
 
 # ============================================

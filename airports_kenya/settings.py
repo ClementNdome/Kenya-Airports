@@ -12,6 +12,9 @@ SECRET_KEY = config("SECRET_KEY", default="dummy-build-key")
 # SECURITY WARNING: don't run with debug turned on in production!
 # DEBUG = config('DEBUG', default=False, cast=bool)  # <-- Read from .env
 DEBUG = config("DEBUG", default=False)
+
+# Mapbox Geocoding API token (server-side only - never expose sk. tokens to the client)
+MAPBOX_ACCESS_TOKEN = config("MAPBOX_ACCESS_TOKEN", default="")
 # ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="*").split(",")  # <-- Read from .env
 ALLOWED_HOSTS = ["*"]
 

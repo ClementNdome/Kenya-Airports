@@ -12,14 +12,20 @@
         </div>
         <div class="card-body">
           <form id="quickCheckForm">
+            <div class="mb-3 position-relative">
+              <label class="form-label"><i class="fas fa-search me-1"></i>Search by Address</label>
+              <input type="text" class="form-control" id="addressSearch" placeholder="Type an address or landmark in Kenya..." autocomplete="off">
+              <small class="text-muted">Pick a suggestion to fill the coordinates automatically.</small>
+            </div>
+            <hr>
             <div class="row g-3">
               <div class="col-md-4">
                 <label class="form-label">Latitude</label>
-                <input type="number" step="any" name="latitude" class="form-control" placeholder="-1.2864" required>
+                <input type="number" step="any" name="latitude" id="quickLat" class="form-control" placeholder="-1.2864" required>
               </div>
               <div class="col-md-4">
                 <label class="form-label">Longitude</label>
-                <input type="number" step="any" name="longitude" class="form-control" placeholder="36.8172" required>
+                <input type="number" step="any" name="longitude" id="quickLon" class="form-control" placeholder="36.8172" required>
               </div>
               <div class="col-md-4">
                 <label class="form-label">Height (m)</label>
@@ -64,10 +70,18 @@
 {% endblock %}
 
 {% block extra_js %}
+<link rel="stylesheet" href="{% static 'css/geocode-widget.css' %}">
+<script src="{% static 'js/geocode-widget.js' %}"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script>
 let resultMap;
+
+initGeocodeSearch({
+  input: document.getElementById('addressSearch'),
+  latInputId: 'quickLat',
+  lonInputId: 'quickLon',
+});
 
 function getLocation() {
   if (!navigator.geolocation) { showToast('Geolocation not supported', 'error'); return; }

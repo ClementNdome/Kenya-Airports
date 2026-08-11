@@ -314,10 +314,17 @@
             {% endfor %}
             
             // Add search functionality
-            document.getElementById('global-search').addEventListener('keypress', function(e) {
+            const globalSearch = document.getElementById('global-search');
+            let searchTimer = null;
+            globalSearch.addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') {
+                    clearTimeout(searchTimer);
                     performGlobalSearch(this.value);
                 }
+            });
+            globalSearch.addEventListener('input', function() {
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(() => performGlobalSearch(this.value), 600);
             });
         }
 
@@ -345,7 +352,7 @@
         async function performGlobalSearch(query) {
             try {
                 // First try airport search
-                const airportResponse = await fetch(`/api/airports/?search=${encodeURIComponent(query)}`);
+                const airportResponse = await fetch(`{% url 'airports_strips:airport_search' %}?search=${encodeURIComponent(query)}`);
                 const airportData = await airportResponse.json();
                 
                 if (airportData.results.length > 0) {
@@ -361,13 +368,13 @@
                     return;
                 }
 
-                // Fallback to address geocoding
-                const geocodeResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+                // Fallback to server-side address geocoding (Mapbox, token never exposed)
+                const geocodeResponse = await fetch(`{% url 'airports_strips:api_geocode' %}?address=${encodeURIComponent(query)}`);
                 const geocodeData = await geocodeResponse.json();
                 
-                if (geocodeData.length > 0) {
+                if (geocodeData.results && geocodeData.results.length > 0) {
                     clearMapOverlays();
-                    const result = geocodeData[0];
+                    const result = geocodeData.results[0];
                     const marker = addMarker(
                         [result.lat, result.lon],
                         result.display_name,
@@ -388,7 +395,7 @@
 
             if (option === 'long_runway') {
                 // Fetch airports with runway length > 1500m
-                const response = await fetch('/long-runway/');
+                const response = await fetch('{% url 'airports_strips:long-runway' %}');
                 const data = await response.json();
                 clearMapOverlays();
                 data.airports.forEach(airport => {
@@ -404,7 +411,7 @@
                 }
             } else if (option === 'near_equator') {
                 // Fetch airports within 50km of the equator
-                const response = await fetch('/near-equator/');
+                const response = await fetch('{% url 'airports_strips:near_equator' %}');
                 const data = await response.json();
                 clearMapOverlays();
                 data.airports.forEach(airport => {
@@ -427,7 +434,7 @@
                     alert('Please enter valid latitude, longitude, and radius values.');
                     return;
                 }
-                const response = await fetch(`/within-radius/?lat=${lat}&lon=${lon}&radius=${radius}`);
+                const response = await fetch(`{% url 'airports_strips:within_radius' %}?lat=${lat}&lon=${lon}&radius=${radius}`);
                 const data = await response.json();
                 clearMapOverlays();
                 data.airports.forEach(airport => {
@@ -449,7 +456,7 @@
                     alert('Please select two airports.');
                     return;
                 }
-                const response = await fetch(`/distance-between/?airport1=${airport1}&airport2=${airport2}`);
+                const response = await fetch(`{% url 'airports_strips:distance_between' %}?airport1=${airport1}&airport2=${airport2}`);
                 const data = await response.json();
                 resultsContainer.innerHTML = `<p>Distance between ${data.airport1.name} and ${data.airport2.name}: ${data.distance_km} km</p>`;
 
@@ -461,7 +468,7 @@
                 currentLines.push(line);
             } else if (option === 'closest_to_kakamega') {
                 // Fetch closest airport to Kakamega
-                const response = await fetch('/closest-airports/');
+                const response = await fetch('{% url 'airports_strips:closest_airports' %}');
                 const data = await response.json();
                 clearMapOverlays();
                 const closestToKakamega = data.closest_to_kakamega;
@@ -529,7 +536,7 @@
                 .bindPopup('<div style="font-family: Arial, sans-serif;"><strong><i class="fas fa-location-dot"></i> Your Location</strong></div>');
 
             // Find the nearest airport
-            const response = await fetch(`/nearest-airport/?lat=${lat}&lon=${lon}`);
+            const response = await fetch(`{% url 'airports_strips:nearest_airport' %}?lat=${lat}&lon=${lon}`);
             const data = await response.json();
 
             // Add a marker for the nearest airport

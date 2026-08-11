@@ -1,4 +1,5 @@
 {% extends 'obstacle_compliance/base.html' %}
+{% load static %}
 
 {% block title %}Check Property - KCAA Obstacle Compliance{% endblock %}
 
@@ -120,6 +121,7 @@
                         </h5>
                         <div>
                             <span class="badge bg-info" id="mapCoordinates"></span>
+                            <span class="badge bg-dark" id="mapAddress" style="display: none;"></span>
                         </div>
                     </div>
                 </div>
@@ -276,6 +278,8 @@
 {% endblock %}
 
 {% block extra_js %}
+<link rel="stylesheet" href="{% static 'css/geocode-widget.css' %}">
+<script src="{% static 'js/geocode-widget.js' %}"></script>
 <script>
     let map, marker;
     
@@ -290,6 +294,7 @@
         // Add click handler to map
         map.on('click', function(e) {
             updateCoordinates(e.latlng.lat, e.latlng.lng);
+            reverseGeocode(e.latlng.lat, e.latlng.lng);
         });
         
         // Initialize marker
@@ -304,6 +309,17 @@
         document.getElementById('useMyLocation').addEventListener('click', useMyLocation);
         document.getElementById('geocodeBtn').addEventListener('click', geocodeAddress);
         
+        // Address autocomplete (Mapbox-backed)
+        initGeocodeSearch({
+            input: document.getElementById('addressSearch'),
+            latInputId: 'latitude',
+            lonInputId: 'longitude',
+            onSubmit: function(result) {
+                updateCoordinates(result.lat, result.lon);
+                showToast('Selected: ' + (result.display_name || result.text), 'success');
+            }
+        });
+        
         // Update coordinates display
         updateCoordinates(-1.2864, 36.8172);
     });
@@ -316,6 +332,23 @@
         
         marker.setLatLng([lat, lng]);
         map.setView([lat, lng]);
+    }
+    
+    let revGeoTimer = null;
+    function reverseGeocode(lat, lon) {
+        clearTimeout(revGeoTimer);
+        revGeoTimer = setTimeout(function() {
+            fetch(`/obstacle-compliance/api/reverse-geocode/?lat=${lat}&lon=${lon}`)
+                .then(response => response.json())
+                .then(data => {
+                    const el = document.getElementById('mapAddress');
+                    if (data.display_name) {
+                        el.innerHTML = `<i class="fas fa-map-pin me-1"></i>${data.display_name}`;
+                        el.style.display = 'inline-block';
+                    }
+                })
+                .catch(() => {});
+        }, 400);
     }
     
     function useMyLocation() {

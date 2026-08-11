@@ -9,6 +9,7 @@ urlpatterns = [
     path('within-radius/', airports_within_radius, name='within_radius'),
     path('distance-between/', distance_between_airports, name='distance_between'),
     path('api/airports/', airport_search, name='airport_search'),
+    path('api/geocode/', GeocodeAPIView.as_view(), name='api_geocode'),
     path('long-runway/', airports_long_runway, name='long-runway'),
     path('index/', index, name='index'),
     path('closest-airports/', closest_airports, name='closest_airports'),

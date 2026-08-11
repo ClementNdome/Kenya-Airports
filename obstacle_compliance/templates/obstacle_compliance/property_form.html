@@ -1,4 +1,5 @@
 {% extends 'obstacle_compliance/base.html' %}
+{% load static %}
 {% block title %}{% if object %}Edit{% else %}Add{% endif %} Property — KCAA OCS{% endblock %}
 {% block content %}
 <div class="container py-4">
@@ -12,6 +13,12 @@
                     </h3>
                     <form method="post">
                         {% csrf_token %}
+                        <div class="mb-4 position-relative">
+                            <label class="form-label"><i class="fas fa-search me-1"></i>Search by Address</label>
+                            <input type="text" class="form-control" id="addressSearch" placeholder="Type an address or landmark in Kenya..." autocomplete="off">
+                            <small class="text-muted">Pick a suggestion to fill coordinates and the address automatically.</small>
+                        </div>
+                        <hr>
                         <div class="row">
                             <div class="col-md-6 mb-3">
                                 <label class="form-label">Property Name *</label>
@@ -19,11 +26,11 @@
                             </div>
                             <div class="col-md-3 mb-3">
                                 <label class="form-label">Latitude *</label>
-                                <input type="number" step="any" name="latitude" class="form-control" value="{{ form.latitude.value|default:'' }}" required placeholder="-1.2864">
+                                <input type="number" step="any" name="latitude" id="formLat" class="form-control" value="{{ form.latitude.value|default:'' }}" required placeholder="-1.2864">
                             </div>
                             <div class="col-md-3 mb-3">
                                 <label class="form-label">Longitude *</label>
-                                <input type="number" step="any" name="longitude" class="form-control" value="{{ form.longitude.value|default:'' }}" required placeholder="36.8172">
+                                <input type="number" step="any" name="longitude" id="formLon" class="form-control" value="{{ form.longitude.value|default:'' }}" required placeholder="36.8172">
                             </div>
                         </div>
                         <div class="row">
@@ -52,4 +59,22 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<link rel="stylesheet" href="{% static 'css/geocode-widget.css' %}">
+<script src="{% static 'js/geocode-widget.js' %}"></script>
+<script>
+initGeocodeSearch({
+    input: document.getElementById('addressSearch'),
+    latInputId: 'formLat',
+    lonInputId: 'formLon',
+    onSubmit: function(result) {
+        const addressInput = document.querySelector('input[name="address"]');
+        if (addressInput && !addressInput.value.trim()) {
+            addressInput.value = result.display_name || result.text || '';
+        }
+    }
+});
+</script>
 {% endblock %}

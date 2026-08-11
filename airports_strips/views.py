@@ -8,6 +8,17 @@ from django.db.models import Avg, Max
 from geopy.distance import geodesic
 from django.db.models import Count
 
+from obstacle_compliance.views import GeocodeView as _CoreGeocodeView
+
+
+class GeocodeAPIView(_CoreGeocodeView):
+    """
+    Server-side address geocoding for the legacy airports-strips map.
+    Mapbox primary (token stays on the server), Nominatim fallback.
+    GET /airports-strips/api/geocode/?address=Nairobi
+    """
+    pass
+
 class AirportMapView(TemplateView):
     template_name = 'airports/map.html'
 
