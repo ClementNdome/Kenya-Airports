@@ -281,14 +281,30 @@ class PropertyComplianceAPI(View):
                     'message': f'Invalid coordinates or height: {str(e)}'
                 }, status=400)
             
-            # Check cache
-            cache_key = f"compliance_api_{lat}_{lon}_{height}"
+            # Optional parcel ring: "lat1,lon1|lat2,lon2|..." (closed polygon)
+            parcel_str = request.GET.get('parcel')
+            parcel_ring = None
+            if parcel_str:
+                try:
+                    parcel_ring = [tuple(float(v) for v in pair.split(',')) for pair in parcel_str.split('|')]
+                    if len(parcel_ring) < 3:
+                        parcel_ring = None
+                except (ValueError, TypeError):
+                    parcel_ring = None
+
+            # Check cache (parcel-aware so a point check never satisfies a
+            # parcel check or vice versa)
+            key_suffix = hashlib.md5((parcel_str or '').encode()).hexdigest()[:10] if parcel_str else 'point'
+            cache_key = f"compliance_api_{lat}_{lon}_{height}_{key_suffix}"
             cached_result = cache.get(cache_key)
             if cached_result:
                 return JsonResponse(cached_result)
             
             # Evaluate compliance with full DEM context
-            result = self._enhanced_compliance_check(point, height)
+            if parcel_ring:
+                result = self._parcel_compliance_check(parcel_ring, height, point)
+            else:
+                result = self._enhanced_compliance_check(point, height)
             
             # Cache result
             cache.set(cache_key, result, 300)
@@ -301,6 +317,47 @@ class PropertyComplianceAPI(View):
                 'status': 'ERROR',
                 'message': f'System error: {str(e)}'
             }, status=500)
+    
+    def _parcel_compliance_check(self, parcel_ring, height, centroid):
+        """Evaluate a parcel polygon: densify the ring, check every vertex,
+        aggregate the worst result across the whole parcel."""
+        from .utils import densify_ring
+        pts = densify_ring(list(parcel_ring), 50.0)
+        if not pts:
+            return self._enhanced_compliance_check(centroid, height)
+        
+        results = []
+        for lat, lon in pts:
+            p = Point(lon, lat, srid=4326)
+            r = calculator.evaluate_property_all_airports(p, height)
+            if r and r.get('status') not in (None, 'ERROR'):
+                r['_point'] = [round(lat, 6), round(lon, 6)]
+                results.append(r)
+        
+        if not results:
+            return self._enhanced_compliance_check(centroid, height)
+        
+        status_priority = {'RED': 0, 'YELLOW': 1, 'GREEN': 2, 'WARNING': 3, 'ERROR': 4}
+        worst = min(results, key=lambda r: status_priority.get(r.get('status'), 4))
+        
+        combined = {
+            'status': worst.get('status'),
+            'status_code': worst.get('status_code'),
+            'message': worst.get('message'),
+            'compliance_score': worst.get('compliance_score'),
+            'is_hazard': worst.get('is_hazard'),
+            'requires_lighting': any(r.get('requires_lighting') for r in results),
+            'airports_affected': worst.get('airports_affected', []),
+            'primary_airport': worst.get('primary_airport'),
+            'primary_result': worst.get('primary_result'),
+            'parcel_points_checked': len(results),
+            'parcel_worst_point': worst.get('_point'),
+            'parcel_mode': True,
+            'dem_context': self._get_dem_context(centroid),
+            'terrain_profile': self._get_terrain_profile(centroid),
+            'visualization': self._generate_visualization_data(centroid, height, worst),
+        }
+        return combined
     
     def _enhanced_compliance_check(self, point, height):
         """Enhanced compliance check with full DEM context"""
@@ -431,11 +488,7 @@ class PropertyComplianceAPI(View):
                 airport_obj = Aerodrome.objects.get(icao_code=airport['icao'])
                 
                 # Generate OLS profile from airport to property
-                profile = self._generate_ols_profile(
-                    airport_obj.geom, 
-                    point, 
-                    airport_obj.elevation_m
-                )
+                profile = self._generate_ols_profile(airport_obj, point)
                 
                 viz_data['affected_airports'].append({
                     'icao': airport['icao'],
@@ -447,15 +500,25 @@ class PropertyComplianceAPI(View):
         
         return viz_data
     
-    def _generate_ols_profile(self, airport_point, property_point, airport_elev):
-        """Generate OLS surface profile between airport and property"""
+    def _generate_ols_profile(self, airport, property_point):
+        """Generate OLS surface profile between airport and property.
+        Runway-aware: when the aerodrome has declared runway geometry the
+        Annex 14 approach/strip/transitional ceilings replace the centroid
+        approximation along the line."""
         
         # Calculate distance and bearing
         from geopy.distance import geodesic
+        from .models import AerodromeRunway
+        airport_point = airport.geom
+        airport_elev = float(airport.elevation_m or 0)
         airport_coords = (airport_point.y, airport_point.x)
         property_coords = (property_point.y, property_point.x)
         
         total_distance = geodesic(airport_coords, property_coords).meters
+        try:
+            runway = AerodromeRunway.objects.filter(icao_code=airport.icao_code).first()
+        except Exception:
+            runway = None
         
         # Generate profile points
         profile = []
@@ -471,6 +534,15 @@ class PropertyComplianceAPI(View):
             # Get ground elevation at this point
             sample_point = Point(lon, lat, srid=4326)
             ground_elev = calculator.dem.get_elevation(sample_point)
+            
+            # Runway-based surfaces bind when they are lower than the centroid ceiling
+            if runway is not None:
+                try:
+                    rc = calculator.calculate_runway_ceiling(sample_point, airport)
+                except Exception:
+                    rc = None
+                if rc and rc.get('ceiling_amsl') is not None and (ols_ceiling is None or rc['ceiling_amsl'] < ols_ceiling):
+                    ols_ceiling = rc['ceiling_amsl']
             
             profile.append({
                 'distance': dist,
@@ -861,10 +933,12 @@ class GeocodeView(View):
     GET /api/geocode/?address=Nairobi
     """
     MAPBOX_URL = 'https://api.mapbox.com/geocoding/v5/mapbox.places/{query}.json'
-    MAPBOX_TYPES = 'address,place,locality,neighborhood,district,poi'
+    MAPBOX_TYPES = 'address,place,locality,neighborhood,district,region,poi'
     NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search'
     USER_AGENT = 'KCAAObstacleCompliance/1.0'
     CACHE_DURATION = 86400
+    EMPTY_CACHE_DURATION = 3600
+    KENYA_BBOX = '33.9,-4.7,41.9,5.5'  # lon_min,lat_min,lon_max,lat_max
 
     def get(self, request):
         address = request.GET.get('address', '').strip()
@@ -873,20 +947,25 @@ class GeocodeView(View):
 
         cache_key = f'geocode_{hashlib.md5(address.lower().encode()).hexdigest()}'
         cached = cache.get(cache_key)
-        if cached:
+        if cached is not None:
             return JsonResponse(cached)
 
-        suggestions = self._geocode_mapbox(address)
-        if suggestions is None:
-            suggestions = self._geocode_nominatim(address)
+        # Query both providers and merge: Nominatim is strong on Kenyan POIs
+        # (Wilson, JKIA, ...), Mapbox fills in towns, estates and addresses.
+        nominatim_results = self._geocode_nominatim(address)
+        mapbox_results = self._geocode_mapbox(address)
 
-        if suggestions is None:
+        if nominatim_results is None and mapbox_results is None:
             return JsonResponse({'error': 'Geocoding service unavailable'}, status=503)
-        if not suggestions:
-            return JsonResponse({'error': 'Address not found'}, status=404)
 
-        response_data = {'results': suggestions}
-        cache.set(cache_key, response_data, self.CACHE_DURATION)
+        suggestions = self._merge_results(nominatim_results, mapbox_results)
+        source = ','.join(name for name, lst in (('nominatim', nominatim_results), ('mapbox', mapbox_results)) if lst)
+
+        response_data = {'results': suggestions, 'source': source}
+        if suggestions:
+            cache.set(cache_key, response_data, self.CACHE_DURATION)
+        else:
+            cache.set(cache_key, response_data, self.EMPTY_CACHE_DURATION)
         return JsonResponse(response_data)
 
     def _geocode_mapbox(self, address):
@@ -901,7 +980,8 @@ class GeocodeView(View):
                 params={
                     'access_token': token,
                     'country': 'ke',
-                    'limit': 5,
+                    'autocomplete': 'true',
+                    'limit': 10,
                     'types': self.MAPBOX_TYPES,
                     'language': 'en',
                 },
@@ -931,9 +1011,11 @@ class GeocodeView(View):
         params = {
             'q': address,
             'format': 'json',
-            'limit': 5,
+            'limit': 10,
             'addressdetails': 1,
             'countrycodes': 'ke',
+            'viewbox': self.KENYA_BBOX,
+            'bounded': 1,
         }
         headers = {'User-Agent': self.USER_AGENT}
 
@@ -944,11 +1026,12 @@ class GeocodeView(View):
 
             suggestions = []
             for r in results:
+                display = self._compact_nominatim_name(r)
                 suggestions.append({
                     'lat': float(r['lat']),
                     'lon': float(r['lon']),
-                    'display_name': r.get('display_name', ''),
-                    'text': r.get('display_name', ''),
+                    'display_name': display,
+                    'text': display,
                     'type': r.get('type', ''),
                 })
             return suggestions
@@ -956,6 +1039,52 @@ class GeocodeView(View):
         except requests.RequestException as e:
             logger.error(f"Geocoding error: {e}")
             return None
+
+    @staticmethod
+    def _compact_nominatim_name(r):
+        """Build a short readable label: POI/building name, then admin area."""
+        ad = r.get('address') or {}
+
+        def first(*keys):
+            for k in keys:
+                if ad.get(k):
+                    return ad[k]
+            return None
+
+        name = r.get('name') or first(
+            'aerodrome', 'attraction', 'building', 'hotel', 'road',
+            'suburb', 'city', 'town', 'village', 'county', 'state', 'region', 'country')
+        region = first('county', 'state', 'region')
+        country = ad.get('country')
+        parts = [p for p in (name, region, country) if p]
+        seen = []
+        out = []
+        for p in parts:
+            if p.lower() in seen:
+                continue
+            seen.append(p.lower())
+            out.append(p)
+        return ', '.join(out)
+
+    @staticmethod
+    def _merge_results(*lists):
+        """Merge provider results, deduplicating by rounded coordinates."""
+        seen = set()
+        merged = []
+        for results in lists:
+            if not results:
+                continue
+            for r in results:
+                key = (round(r['lat'], 3), round(r['lon'], 3))
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(r)
+                if len(merged) >= 10:
+                    break
+            if len(merged) >= 10:
+                break
+        return merged
 
 
 class ReverseGeocodeView(View):
@@ -1256,18 +1385,143 @@ class SavePropertyFromCheckView(LoginRequiredMixin, View):
 
     def post(self, request):
         try:
+            from django.contrib.gis.geos import MultiPolygon, Polygon
             data = json.loads(request.body)
+            lat = float(data['lat'])
+            lon = float(data['lon'])
+            # Optional parcel ring: [[lat, lon], [lat, lon], ...]
+            parcel_geom = None
+            parcel_ring = data.get('parcel') or []
+            if isinstance(parcel_ring, list) and len(parcel_ring) >= 3:
+                ring = [(float(p[1]), float(p[0])) for p in parcel_ring]
+                if ring[0] != ring[-1]:
+                    ring.append(ring[0])
+                if len(ring) >= 4:
+                    try:
+                        parcel_geom = MultiPolygon([Polygon(ring)])
+                    except Exception:
+                        parcel_geom = None
             prop = Property.objects.create(
                 user=request.user,
-                name=data.get('name', f"Property @ {data['lat']:.4f}, {data['lon']:.4f}"),
-                latitude=float(data['lat']),
-                longitude=float(data['lon']),
+                name=data.get('name', f"Property @ {lat:.4f}, {lon:.4f}"),
+                latitude=lat,
+                longitude=lon,
+                geom=Point(lon, lat, srid=4326),
+                parcel_boundary=parcel_geom,
                 height_m=float(data.get('height', 30)),
                 address=data.get('address', ''),
             )
-            return JsonResponse({'id': prop.pk, 'name': prop.name, 'status': 'created'})
+            return JsonResponse({'id': prop.pk, 'name': prop.name, 'status': 'created', 'has_parcel': parcel_geom is not None})
         except (KeyError, ValueError, TypeError) as e:
             return JsonResponse({'error': str(e)}, status=400)
+
+
+# ============================================
+# PUBLIC PROPERTY QUERY TOOL
+# ============================================
+
+class PropertyQueryPageView(TemplateView):
+    """Public read-only browser for saved compliance checks."""
+
+    template_name = 'obstacle_compliance/property_query.html'
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['aerodromes'] = Aerodrome.objects.filter(
+            icao_code__isnull=False
+        ).exclude(icao_code='').order_by('icao_code')[:200]
+        ctx['status_choices'] = ['GREEN', 'YELLOW', 'RED']
+        ctx['total_properties'] = Property.objects.filter(is_active=True).count()
+        return ctx
+
+
+class PropertyQueryAPI(View):
+    """Public read-only spatial query over saved properties.
+    Filters: icao + radius_km around ARP (or lat/lon center),
+    min/max height, last status. Sorted by height desc."""
+
+    def get(self, request):
+        try:
+            qs = Property.objects.filter(is_active=True).select_related('user')
+            
+            icao = (request.GET.get('icao') or '').strip().upper()
+            center = None
+            if icao:
+                ad = Aerodrome.objects.filter(icao_code=icao).first()
+                if ad is None or ad.geom is None:
+                    return JsonResponse({'error': 'Aerodrome not found'}, status=404)
+                center = Point(ad.geom.x, ad.geom.y, srid=4326)
+            else:
+                try:
+                    lat = float(request.GET.get('lat') or '')
+                    lon = float(request.GET.get('lon') or '')
+                    center = Point(lon, lat, srid=4326)
+                except (TypeError, ValueError):
+                    pass
+            
+            try:
+                radius_km = float(request.GET.get('radius_km') or 50)
+            except (TypeError, ValueError):
+                radius_km = 50.0
+            radius_km = max(1.0, min(radius_km, 200.0))
+            
+            if center is not None and qs.exists():
+                qs = qs.filter(geom__distance_lte=(center, D(km=radius_km)))
+            
+            min_h = request.GET.get('min_height')
+            if min_h:
+                try:
+                    qs = qs.filter(height_m__gte=float(min_h))
+                except (TypeError, ValueError):
+                    pass
+            max_h = request.GET.get('max_height')
+            if max_h:
+                try:
+                    qs = qs.filter(height_m__lte=float(max_h))
+                except (TypeError, ValueError):
+                    pass
+            
+            status = (request.GET.get('status') or '').strip().upper()
+            if status in ('GREEN', 'YELLOW', 'RED'):
+                qs = qs.filter(last_status=status)
+            
+            try:
+                limit = min(max(int(request.GET.get('limit') or 500), 1), 1000)
+            except (TypeError, ValueError):
+                limit = 500
+            
+            results = []
+            for p in qs.order_by('-height_m')[:limit]:
+                dist_km = None
+                if center is not None and p.geom is not None:
+                    try:
+                        dist_km = round(calculator.calculate_distance(center, p.geom) / 1000.0, 2)
+                    except Exception:
+                        dist_km = None
+                results.append({
+                    'id': p.pk,
+                    'name': p.name,
+                    'address': p.address or '',
+                    'user': p.user.username if p.user else None,
+                    'lat': p.latitude,
+                    'lon': p.longitude,
+                    'height_m': p.height_m,
+                    'status': p.last_status,
+                    'score': p.last_score,
+                    'checked_at': p.last_checked.isoformat() if p.last_checked else None,
+                    'distance_km': dist_km,
+                })
+            
+            return JsonResponse({
+                'count': len(results),
+                'icao': icao or None,
+                'center': [center.y, center.x] if center is not None else None,
+                'radius_km': radius_km,
+                'results': results,
+            })
+        except Exception as e:
+            logger.error(f"PropertyQueryAPI error: {e}", exc_info=True)
+            return JsonResponse({'error': str(e)}, status=500)
 
 
 # ============================================
@@ -1302,7 +1556,7 @@ class ComplianceReportView(View):
                     'height': height,
                 },
                 'compliance': result,
-                'status_color': '#dc3545' if result['status'] == 'HAZARD' else '#28a745',
+                'status_color': {'RED': '#dc3545', 'YELLOW': '#ffc107', 'GREEN': '#28a745'}.get(result.get('status'), '#28a745'),
                 'disclaimer': 'This report is generated for informational purposes only. '
                               'Official approval must be obtained from KCAA before construction.'
             }

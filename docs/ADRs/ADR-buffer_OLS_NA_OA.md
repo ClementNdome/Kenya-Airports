@@ -10,12 +10,28 @@ Server runway buffer unavailable.
 
 ## 1. 3D Obstacle Limitation Surfaces (OLS)
 
-**Status:** to be done
+**Status:** IN PROGRESS — runway data now available (2026-08-11)
 
 **Current implementation (Phase 2):** 2D polygon approximations for OLS:
 - Runway centerline strip (ST_Buffer around LineString)
 - Threshold approach wedges as flat 2D polygons
 - Complex OLS combining strip + wedges
+
+**Data unlocked:** 23 runways (19 aerodromes) in `public."aerodrome-runways"`
+(LineString `geom`, threshold coordinates/elevations, true/mag bearings, declared length,
+strip dimensions) + `public."runways-declared_distances"` (TORA/TODA/ASDA/LDA per runway end,
+joined via `(icao_code, TRIM(runway_pair))`). All rows link to existing `Aerodrome` rows.
+
+**Implemented (Phase 2.5, see `obstacle_compliance/utils.py`):**
+- True Annex 14 surfaces computed from runway geometry (geodetic bearing from `geom` endpoints):
+  - Strip: half-width from `strip_dimensions` or 150m (≥1800m) / 75m (<1800m)
+  - Approach surface: 2% (1:50) slope per runway end, 15% lateral divergence,
+    inner width = 2× strip half-width, length 3000m
+  - Transitional surface: 1:7 (14.3%) from strip edge
+  - Horizontal surface: flat 45m ceiling within 4km of ARP
+  - Conical surface: 5% slope 4–6km from ARP
+- Ceiling at a point = minimum of all applicable surfaces (most restrictive)
+- Hybrid fallback: aerodromes without runway rows keep the centroid approximation
 
 **Future requirement:** True 3D sloped surfaces:
 - Approach surface: climbs from threshold at defined gradient (e.g. 2%) to a defined width/distance

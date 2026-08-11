@@ -16,6 +16,8 @@ urlpatterns = [
     
     # Property compliance
     path('property-check/', views.PropertyComplianceView.as_view(), name='property_check'),
+    path('property-query/', views.PropertyQueryPageView.as_view(), name='property_query'),
+    path('api/properties/query/', views.PropertyQueryAPI.as_view(), name='api_property_query'),
     path('api/check-compliance/', views.PropertyComplianceAPI.as_view(), name='api_check_compliance'),
     path('api/batch-check/', views.BatchComplianceView.as_view(), name='api_batch_check'),
     

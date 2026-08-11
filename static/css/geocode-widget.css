@@ -42,3 +42,39 @@
     color: #6c757d;
     cursor: default;
 }
+
+.geocode-item.active {
+    background: #e9f2ff;
+}
+
+.geocode-item.loading,
+.geocode-item.empty {
+    cursor: default;
+    justify-content: flex-start;
+    gap: 0.5rem;
+    color: #6c757d;
+}
+
+.geocode-spinner {
+    display: inline-block;
+    width: 0.9rem;
+    height: 0.9rem;
+    border: 2px solid rgba(13, 110, 253, 0.25);
+    border-top-color: #0d6efd;
+    border-radius: 50%;
+    animation: geocode-spin 0.7s linear infinite;
+}
+
+@keyframes geocode-spin {
+    to { transform: rotate(360deg); }
+}
+
+.geocode-type.airport {
+    background: #0d6efd;
+    color: #fff;
+    border-radius: 0.25rem;
+    padding: 0.05rem 0.4rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}

@@ -250,6 +250,11 @@
                             <i class="fas fa-building me-1"></i> Property Check
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'obstacle_compliance:property_query' %}">
+                            <i class="fas fa-filter me-1"></i> Property Query
+                        </a>
+                    </li>
                     {% if user.is_authenticated %}
                     <li class="nav-item">
                         <a class="nav-link" href="{% url 'obstacle_compliance:property_list' %}">

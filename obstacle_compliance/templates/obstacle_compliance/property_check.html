@@ -33,7 +33,7 @@
                     </h5>
                 </div>
                 <div class="card-body">
-                    <form id="propertyForm">
+                    <form id="propertyForm" onsubmit="return false;">
                         {% csrf_token %}
                         
                         <!-- Search by Address -->
@@ -88,6 +88,14 @@
                                 <i class="fas fa-check-circle me-2"></i>
                                 Check Compliance
                             </button>
+                            <button type="button" class="btn btn-outline-primary" id="drawParcel">
+                                <i class="fas fa-vector-square me-2"></i>
+                                Draw Parcel
+                            </button>
+                            <button type="button" class="btn btn-outline-danger" id="clearParcel" style="display: none;">
+                                <i class="fas fa-eraser me-2"></i>
+                                Clear Parcel
+                            </button>
                             <button type="button" class="btn btn-outline-secondary" id="useMyLocation">
                                 <i class="fas fa-location-dot me-2"></i>
                                 Use My Location
@@ -101,7 +109,8 @@
                         <strong>Quick Tips:</strong>
                         <ul class="mb-0 mt-2 small">
                             <li>Structures >30m require obstruction lighting within 15km zone</li>
-                            <li>Maximum height varies based on distance from airport</li>
+                            <li>Maximum height varies based on distance from airport, runway approach paths and transitional surfaces</li>
+                            <li>Draw a parcel to check the whole plot, not just the centroid</li>
                             <li>Download compliance report for official records</li>
                         </ul>
                     </div>
@@ -126,7 +135,11 @@
                     </div>
                 </div>
                 <div class="card-body p-0">
-                    <div id="propertyMap" class="map-container" style="height: 400px;"></div>
+                    <div id="propertyMap" class="map-container" style="height: 460px;"></div>
+                </div>
+                <div class="card-footer bg-white small text-muted">
+                    <i class="fas fa-layer-group me-1"></i>
+                    After a check: airports shown as markers, rings show the 4/6/15 km OLS zones around the primary aerodrome.
                 </div>
             </div>
             
@@ -222,6 +235,14 @@
                         <td>Airports Affected:</td>
                         <td class="fw-bold" id="airportsCount">0</td>
                     </tr>
+                    <tr id="surfacesRow" style="display:none;">
+                        <td>OLS Surfaces:</td>
+                        <td class="fw-bold" id="olsSurfaces"></td>
+                    </tr>
+                    <tr id="parcelRow" style="display:none;">
+                        <td>Parcel Points:</td>
+                        <td class="fw-bold" id="parcelPoints"></td>
+                    </tr>
                 </table>
             </div>
             <div class="col-md-6">
@@ -230,6 +251,36 @@
                     Requirements
                 </h6>
                 <div id="requirements"></div>
+            </div>
+        </div>
+        
+        <!-- DEM Confidence Panel -->
+        <div class="card bg-light border mt-3 mb-3">
+            <div class="card-body py-2">
+                <h6 class="fw-bold mb-2 text-muted">
+                    <i class="fas fa-mountain me-2"></i>
+                    Terrain Model (DEM) Confidence
+                </h6>
+                <div class="row small align-items-center">
+                    <div class="col-md-3">
+                        <span id="demSource">—</span>
+                    </div>
+                    <div class="col-md-2">
+                        <span class="badge bg-secondary" id="demQuality">—</span>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="progress" style="height: 14px;">
+                            <div class="progress-bar" id="demConfidence" role="progressbar" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <span class="text-muted" id="demMeta">—</span>
+                    </div>
+                </div>
+                <div class="small text-muted mt-2 mb-0">
+                    <i class="fas fa-info-circle me-1"></i>
+                    Elevation <b id="demElevation">—</b> m AMSL · std dev <b id="demStd">—</b> m · <span id="demInterp">—</span>
+                </div>
             </div>
         </div>
         
@@ -250,6 +301,17 @@
                 </thead>
                 <tbody></tbody>
             </table>
+        </div>
+        
+        <!-- Cross-Section Charts -->
+        <h6 class="fw-bold mt-4 mb-3">
+            <i class="fas fa-chart-line me-2 text-primary"></i>
+            OLS Cross-Section (terrain vs ceiling)
+        </h6>
+        <div id="chartContainer"></div>
+        <div class="small text-muted mb-2">
+            <i class="fas fa-info-circle me-1"></i>
+            Solid line = OLS ceiling (Annex 14 surfaces where applicable), dashed line = terrain. The vertical gap is your headroom at that distance from the aerodrome reference point.
         </div>
         
         <!-- Action Buttons -->
@@ -282,14 +344,36 @@
 <script src="{% static 'js/geocode-widget.js' %}"></script>
 <script>
     let map, marker;
+    let parcelRing = null;
+    let parcelLayer = null;
+    let oxyLayers = L.layerGroup();
+    let charts = [];
     
     document.addEventListener('DOMContentLoaded', function() {
+        // Prefill from URL query params (?lat=..&lon=..&height=..&address=..)
+        const params = new URLSearchParams(window.location.search);
+        const pLat = params.get('lat');
+        const pLon = params.get('lon');
+        const pH = params.get('height');
+        const pA = params.get('address');
+        if (pLat && pLon) {
+            document.getElementById('latitude').value = pLat;
+            document.getElementById('longitude').value = pLon;
+        }
+        if (pH) {
+            document.getElementById('height').value = pH;
+        }
+        if (pA) {
+            document.getElementById('addressSearch').value = pA;
+        }
+        
         // Initialize map
         map = L.map('propertyMap').setView([-1.2864, 36.8172], 13);
         
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         }).addTo(map);
+        map.addLayer(oxyLayers);
         
         // Add click handler to map
         map.on('click', function(e) {
@@ -298,7 +382,9 @@
         });
         
         // Initialize marker
-        marker = L.marker([-1.2864, 36.8172], { draggable: true }).addTo(map);
+        const initialLat = pLat ? parseFloat(pLat) : -1.2864;
+        const initialLon = pLon ? parseFloat(pLon) : 36.8172;
+        marker = L.marker([initialLat, initialLon], { draggable: true }).addTo(map);
         marker.on('dragend', function(e) {
             const pos = e.target.getLatLng();
             updateCoordinates(pos.lat, pos.lng);
@@ -308,6 +394,8 @@
         document.getElementById('checkCompliance').addEventListener('click', checkCompliance);
         document.getElementById('useMyLocation').addEventListener('click', useMyLocation);
         document.getElementById('geocodeBtn').addEventListener('click', geocodeAddress);
+        document.getElementById('drawParcel').addEventListener('click', startParcelDraw);
+        document.getElementById('clearParcel').addEventListener('click', clearParcel);
         
         // Address autocomplete (Mapbox-backed)
         initGeocodeSearch({
@@ -321,7 +409,10 @@
         });
         
         // Update coordinates display
-        updateCoordinates(-1.2864, 36.8172);
+        updateCoordinates(initialLat, initialLon);
+        if (pLat && pLon && pA) {
+            reverseGeocode(parseFloat(pLat), parseFloat(pLon));
+        }
     });
     
     function updateCoordinates(lat, lng) {
@@ -399,6 +490,109 @@
             });
     }
     
+    // ============================================
+    // PARCEL DRAWING
+    // ============================================
+    function startParcelDraw() {
+        if (typeof L.Draw === 'undefined') {
+            showToast('Drawing tools not loaded yet', 'warning');
+            return;
+        }
+        const drawControl = new L.Control.Draw({
+            position: 'topright',
+            draw: {
+                polygon: { allowIntersection: false, showArea: true },
+                polyline: false, rectangle: false, circle: false, marker: false, circlemarker: false
+            },
+            edit: false
+        });
+        map.addControl(drawControl);
+        showToast('Click on the map to draw your parcel polygon, then click the first point to close it', 'info');
+        let created = false;
+        const handler = function(e) {
+            clearParcel(null, true);
+            parcelRing = e.layer.getLatLngs()[0].map(p => [p.lat, p.lng]);
+            parcelLayer = L.polygon(e.layer.getLatLngs(), {
+                color: '#dc3545', weight: 2, dashArray: '6 4', fillOpacity: 0.12
+            }).addTo(oxyLayers);
+            const area = (e.layer.getLatLngs()[0]);
+            const pts = parcelRing.length;
+            map.removeControl(drawControl);
+            document.getElementById('drawParcel').style.display = 'none';
+            document.getElementById('clearParcel').style.display = 'block';
+            showToast('Parcel drawn with ' + pts + ' corners (' + pts + ' pts). Check will scan every 50m along the boundary.', 'success');
+            map.off('draw:created', handler);
+            created = true;
+        };
+        map.on('draw:created', handler);
+    }
+    
+    function clearParcel(evt, silent) {
+        parcelRing = null;
+        if (parcelLayer) {
+            oxyLayers.removeLayer(parcelLayer);
+            parcelLayer = null;
+        }
+        document.getElementById('drawParcel').style.display = 'inline-block';
+        document.getElementById('clearParcel').style.display = 'none';
+        if (!silent) {
+            showToast('Parcel cleared', 'info');
+        }
+    }
+    
+    function parcelParam() {
+        if (!parcelRing || parcelRing.length < 3) return '';
+        return parcelRing.map(p => p[0].toFixed(6) + ',' + p[1].toFixed(6)).join('|');
+    }
+    
+    // ============================================
+    // POST-CHECK MAP OVERLAYS
+    // ============================================
+    let airportsCache = null;
+    function getAirportsCache() {
+        if (airportsCache) return Promise.resolve(airportsCache);
+        return fetch('/obstacle-compliance/api/airports.geojson')
+            .then(r => r.json())
+            .then(data => {
+                airportsCache = data.features || [];
+                return airportsCache;
+            })
+            .catch(() => {
+                airportsCache = [];
+                return airportsCache;
+            });
+    }
+    
+    function drawOverlays(data) {
+        oxyLayers.clearLayers();
+        const apts = data.airports_affected || [];
+        if (!apts.length) return;
+        
+        getAirportsCache().then(features => {
+            const byIcao = {};
+            features.forEach(f => { if (f.properties && f.properties.icao_code) byIcao[f.properties.icao_code] = f; });
+            
+            const primaryIcao = data.primary_airport && data.primary_airport.icao_code;
+            apts.forEach(apt => {
+                const feat = byIcao[apt.icao];
+                const latlng = feat ? [feat.geometry.coordinates[1], feat.geometry.coordinates[0]] : null;
+                const color = apt.status === 'RED' ? '#dc3545' : apt.status === 'YELLOW' ? '#ffc107' : '#28a745';
+                if (latlng) {
+                    L.circleMarker(latlng, { radius: 8, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 })
+                        .addTo(oxyLayers)
+                        .bindTooltip(`${apt.icao} — ${apt.name} (${apt.distance_km} km)`);
+                    // 15km regulatory ring; primary gets full 4/6/15 OLS rings
+                    const rings = apt.icao === primaryIcao ? [4000, 6000, 15000] : [15000];
+                    rings.forEach(r => {
+                        L.circle(latlng, {
+                            radius: r, color: color, weight: 1.2, dashArray: '4 4', fillOpacity: 0.05
+                        }).addTo(oxyLayers);
+                    });
+                }
+            });
+        });
+    }
+    
     function checkCompliance() {
         const lat = document.getElementById('latitude').value;
         const lon = document.getElementById('longitude').value;
@@ -417,11 +611,19 @@
         // Scroll to results
         document.getElementById('resultsCard').scrollIntoView({ behavior: 'smooth' });
         
+        // Build query string (parcel appended when drawn)
+        let qs = `/obstacle-compliance/api/check-compliance/?lat=${lat}&lon=${lon}&height=${height}`;
+        const parcel = parcelParam();
+        if (parcel) {
+            qs += '&parcel=' + encodeURIComponent(parcel);
+        }
+        
         // Make API call
-        fetch(`/obstacle-compliance/api/check-compliance/?lat=${lat}&lon=${lon}&height=${height}`)
+        fetch(qs)
             .then(response => response.json())
             .then(data => {
                 displayResults(data);
+                drawOverlays(data);
             })
             .catch(error => {
                 console.error('Compliance check error:', error);
@@ -429,6 +631,13 @@
                 document.getElementById('resultsLoading').style.display = 'none';
                 document.getElementById('resultsCard').style.display = 'none';
             });
+    }
+    
+    function getStatusClass(status) {
+        if (status === 'GREEN') return 'success';
+        if (status === 'YELLOW') return 'warning';
+        if (status === 'RED') return 'danger';
+        return 'info';
     }
     
     function displayResults(data) {
@@ -452,17 +661,28 @@
         
         // Primary result
         const pr = data.primary_result || {};
-        template.querySelector('#nearestDistance').textContent = pr.distance_km + ' km';
-        template.querySelector('#nearestAirport').textContent = data.primary_airport?.name || 'Unknown';
-        template.querySelector('#maxAllowed').textContent = pr.max_allowed_agl || 'No limit';
-        template.querySelector('#headroom').textContent = pr.headroom || 'N/A';
+        template.querySelector('#nearestDistance').textContent = (pr.distance_km || 0) + ' km';
+        template.querySelector('#nearestAirport').textContent = (data.primary_airport && data.primary_airport.name) || 'Unknown';
+        template.querySelector('#maxAllowed').textContent = pr.max_allowed_agl != null ? pr.max_allowed_agl : 'No limit';
+        template.querySelector('#headroom').textContent = pr.headroom != null ? pr.headroom + ' m' : 'N/A';
         
         // Property details
         template.querySelector('#displayCoordinates').textContent = 
             `${document.getElementById('latitude').value}, ${document.getElementById('longitude').value}`;
-        template.querySelector('#groundElevation').textContent = pr.ground_elevation + 'm AMSL';
-        template.querySelector('#buildingTop').textContent = pr.building_top_amsl + 'm AMSL';
+        template.querySelector('#groundElevation').textContent = (pr.ground_elevation != null ? pr.ground_elevation : '—') + 'm AMSL';
+        template.querySelector('#buildingTop').textContent = (pr.building_top_amsl != null ? pr.building_top_amsl : '—') + 'm AMSL';
         template.querySelector('#airportsCount').textContent = data.airports_affected_count || 0;
+        
+        // OLS surfaces + parcel mode rows
+        const surfaces = pr.surfaces_checked;
+        if (surfaces && surfaces.length) {
+            template.querySelector('#surfacesRow').style.display = '';
+            template.querySelector('#olsSurfaces').textContent = surfaces.join(', ');
+        }
+        if (data.parcel_mode) {
+            template.querySelector('#parcelRow').style.display = '';
+            template.querySelector('#parcelPoints').textContent = `${data.parcel_points_checked || 0} pts · worst @ ${(data.parcel_worst_point || []).join(', ')}`;
+        }
         
         // Requirements
         const requirements = template.querySelector('#requirements');
@@ -494,12 +714,18 @@
             });
         }
         
+        // DEM panel + charts (on cloned node before append)
+        renderDemPanelOnNode(data.dem_context, template);
+        renderChartsOnNode(data.visualization, template);
+        
         // Clear and append new content
         document.getElementById('resultsContent').innerHTML = '';
         document.getElementById('resultsContent').appendChild(template);
         
         // Add event listeners for buttons
         document.getElementById('downloadReport').addEventListener('click', downloadReport);
+        document.getElementById('printResults').addEventListener('click', () => window.print());
+        document.getElementById('shareResults').addEventListener('click', shareResults);
         
         // Show and bind save button
         const saveBtn = document.getElementById('saveProperty');
@@ -509,14 +735,117 @@
         }
     }
     
+    function renderDemPanelOnNode(dem, node) {
+        if (!dem) return;
+        const q = s => node.querySelector(s);
+        const set = (sel, html) => { const el = q(sel); if (el) el.innerHTML = html; };
+        set('#demSource', dem.source || '—');
+        set('#demQuality', dem.quality || '—');
+        const conf = dem.confidence || 0;
+        const bar = q('#demConfidence');
+        if (bar) {
+            bar.style.width = conf + '%';
+            bar.className = 'progress-bar ' + (conf >= 85 ? 'bg-success' : conf >= 70 ? 'bg-warning' : 'bg-danger');
+        }
+        set('#demElevation', dem.elevation != null ? dem.elevation : '—');
+        set('#demStd', dem.std_deviation != null ? dem.std_deviation : '—');
+        set('#demInterp', dem.interpolation || '—');
+        set('#demMeta', (dem.samples_taken ? dem.samples_taken + ' samples' : '—'));
+    }
+    
+    function renderChartsOnNode(viz, node) {
+        charts.forEach(c => { try { c.destroy(); } catch (e) {} });
+        charts = [];
+        const container = node.querySelector('#chartContainer');
+        if (!container) return;
+        container.innerHTML = '';
+        const airports = (viz && viz.affected_airports) || [];
+        if (!airports.length) {
+            container.innerHTML = '<div class="text-muted small">No cross-section data available.</div>';
+            return;
+        }
+        airports.forEach(apt => {
+            const profile = (apt.profile || []).filter(p => p.ols_ceiling != null);
+            const wrap = document.createElement('div');
+            wrap.className = 'card border mb-3';
+            wrap.innerHTML = `<div class="card-header bg-white py-2 fw-bold small">${apt.icao || 'Airport'} — OLS profile across ${Math.round((profile.length ? profile[profile.length - 1].distance : 0) / 1000 * 10) / 10} km</div>`;
+            const body = document.createElement('div');
+            body.className = 'card-body py-2';
+            body.innerHTML = '<canvas height="160"></canvas>';
+            wrap.appendChild(body);
+            container.appendChild(wrap);
+            if (!profile.length) {
+                body.innerHTML = '<div class="small text-muted">No ceiling data on this line.</div>';
+                return;
+            }
+            const labels = profile.map(p => (p.distance / 1000).toFixed(1));
+            try {
+                const chart = new Chart(body.querySelector('canvas').getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'OLS ceiling (m AMSL)',
+                                data: profile.map(p => Math.round(p.ols_ceiling * 10) / 10),
+                                borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,0.08)', tension: 0.2
+                            },
+                            {
+                                label: 'Terrain (m AMSL)',
+                                data: profile.map(p => p.ground_elevation == null ? null : Math.round(p.ground_elevation * 10) / 10),
+                                borderColor: '#6c757d', borderDash: [5, 5], tension: 0.2
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { legend: { labels: { boxWidth: 12, font: { size: 11 } } } },
+                        scales: {
+                            x: { title: { display: true, text: 'Distance from ARP (km)' } },
+                            y: { title: { display: true, text: 'Elevation (m AMSL)' } }
+                        }
+                    }
+                });
+                charts.push(chart);
+            } catch (e) {
+                body.innerHTML = '<div class="small text-muted">Chart unavailable.</div>';
+            }
+        });
+    }
+    
+    function shareResults() {
+        const lat = document.getElementById('latitude').value;
+        const lon = document.getElementById('longitude').value;
+        const height = document.getElementById('height').value;
+        const url = window.location.origin + '/obstacle-compliance/property-check/?lat=' + lat + '&lon=' + lon + '&height=' + height;
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(url).then(() => showToast('Link copied to clipboard', 'success'));
+        } else {
+            window.prompt('Copy this link:', url);
+        }
+    }
+    
     function saveProperty() {
         const lat = document.getElementById('latitude').value;
         const lon = document.getElementById('longitude').value;
         const height = document.getElementById('height').value;
+        const address = document.getElementById('addressSearch').value || 
+                        document.getElementById('mapAddress').textContent.replace(/^\s*[\w-]*\s*/, '') || '';
         const btn = document.getElementById('saveProperty');
         
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
+        
+        const payload = {
+            lat: parseFloat(lat),
+            lon: parseFloat(lon),
+            height: parseFloat(height),
+            name: address ? address.slice(0, 200) : (`Property @ ${parseFloat(lat).toFixed(4)}, ${parseFloat(lon).toFixed(4)}`),
+            address: address,
+        };
+        if (parcelRing && parcelRing.length >= 3) {
+            payload.parcel = parcelRing.map(p => [p[0], p[1]]);
+        }
         
         fetch('/obstacle-compliance/api/save-property/', {
             method: 'POST',
@@ -524,12 +853,12 @@
                 'Content-Type': 'application/json',
                 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
             },
-            body: JSON.stringify({ lat, lon, height }),
+            body: JSON.stringify(payload),
         })
         .then(r => r.json())
         .then(data => {
             if (data.status === 'created') {
-                showToast('Property saved to your portfolio!', 'success');
+                showToast(data.has_parcel ? 'Property + parcel boundary saved!' : 'Property saved to your portfolio!', 'success');
                 btn.innerHTML = '<i class="fas fa-check me-2"></i>Saved';
             } else {
                 showToast('Error saving property', 'error');

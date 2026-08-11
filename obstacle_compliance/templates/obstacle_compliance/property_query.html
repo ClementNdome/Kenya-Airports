@@ -1,0 +1,209 @@
+{% extends 'obstacle_compliance/base.html' %}
+{% block title %}Property Query — KCAA OCS{% endblock %}
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="fas fa-filter me-2 text-primary"></i>Property Query Tool</h2>
+        <span class="badge bg-secondary">{{ total_properties }} saved properties</span>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <form id="queryForm" class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold" for="icao">Aerodrome (center)</label>
+                    <select class="form-select" id="icao" name="icao">
+                        <option value="">— Any (use map center) —</option>
+                        {% for ad in aerodromes %}
+                        <option value="{{ ad.icao_code }}">{{ ad.icao_code }} — {{ ad.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-bold" for="radiusKm">Radius (km)</label>
+                    <input type="number" class="form-control" id="radiusKm" name="radius_km" value="50" min="1" max="200">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-bold" for="minHeight">Min height (m)</label>
+                    <input type="number" class="form-control" id="minHeight" name="min_height" min="0" placeholder="Any">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-bold" for="maxHeight">Max height (m)</label>
+                    <input type="number" class="form-control" id="maxHeight" name="max_height" min="0" placeholder="Any">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-bold" for="status">Status</label>
+                    <select class="form-select" id="status" name="status">
+                        <option value="">Any</option>
+                        {% for s in status_choices %}
+                        <option value="{{ s }}">{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-1 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary w-100" id="queryBtn"><i class="fas fa-search"></i></button>
+                    <button type="button" class="btn btn-outline-secondary" id="resetBtn" title="Reset"><i class="fas fa-undo"></i></button>
+                </div>
+            </form>
+            <p class="small text-muted mt-2 mb-0">
+                <i class="fas fa-info-circle me-1"></i>
+                Query filters saved compliance checks. If no aerodrome is chosen, results are centred on the visible map area.
+            </p>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-6">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white fw-bold"><i class="fas fa-map me-1"></i>Results Map</div>
+                <div id="queryMap" style="height: 520px;" class="card-body p-0"></div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-list me-1"></i>Results <span id="resultCount" class="badge bg-primary ms-1">0</span></span>
+                    <button class="btn btn-sm btn-outline-secondary" id="exportBtn"><i class="fas fa-download me-1"></i>CSV</button>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 470px; overflow-y: auto;">
+                        <table class="table table-hover table-sm mb-0">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Height</th>
+                                    <th>Status</th>
+                                    <th>Dist (km)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultBody">
+                                <tr><td colspan="4" class="text-center text-muted py-4">Run a query to see results</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+    const map = L.map('queryMap').setView([-0.0236, 37.9062], 7);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19, attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    const markers = L.layerGroup().addTo(map);
+    const radiusLayer = L.layerGroup().addTo(map);
+    let circle = null;
+
+    const COLORS = { 'GREEN': '#28a745', 'YELLOW': '#ffc107', 'RED': '#dc3545', 'None': '#6c757d' };
+
+    function clearLayers() {
+        markers.clearLayers();
+        radiusLayer.clearLayers();
+        circle = null;
+    }
+
+    function render(center, radiusKm, results) {
+        clearLayers();
+        if (center) {
+            circle = L.circle([center[0], center[1]], { radius: radiusKm * 1000, color: '#0d6efd', fillOpacity: 0.06 }).addTo(radiusLayer);
+            L.marker([center[0], center[1]], { zIndexOffset: 1000 }).addTo(radiusLayer).bindTooltip('Search centre');
+        }
+        results.forEach(function (r) {
+            const color = COLORS[r.status] || COLORS['None'];
+            const m = L.circleMarker([r.lat, r.lon], {
+                radius: 7, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.9
+            }).addTo(markers);
+            m.bindPopup(
+                '<strong>' + escapeHtml(r.name) + '</strong><br>' +
+                (r.address ? escapeHtml(r.address) + '<br>' : '') +
+                'Height: ' + r.height_m + ' m<br>' +
+                'Status: <span class="fw-bold">' + (r.status || '—') + '</span> · Score: ' + (r.score ?? '—') + '<br>' +
+                (r.checked_at ? 'Checked: ' + new Date(r.checked_at).toLocaleDateString() + '<br>' : '') +
+                (r.distance_km != null ? 'Distance: ' + r.distance_km + ' km' : '') +
+                ' <a href="/obstacle-compliance/property-check/?lat=' + r.lat + '&lon=' + r.lon + '&height=' + r.height_m + '">Re-check →</a>'
+            );
+        });
+        if (results.length) {
+            const bounds = L.featureGroup(markers.getLayers().concat(radiusLayer.getLayers())).getBounds();
+            map.fitBounds(bounds.pad(0.2));
+        }
+    }
+
+    function escapeHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s || '';
+        return d.innerHTML;
+    }
+
+    async function runQuery() {
+        const params = new URLSearchParams();
+        const icao = document.getElementById('icao').value;
+        params.set('radius_km', document.getElementById('radiusKm').value || '50');
+        if (icao) { params.set('icao', icao); }
+        else if (circle) { params.set('lat', circle.getLatLng().lat); params.set('lon', circle.getLatLng().lng); }
+        else if (map.getCenter()) { params.set('lat', map.getCenter().lat); params.set('lon', map.getCenter().lng); }
+        const minH = document.getElementById('minHeight').value;
+        const maxH = document.getElementById('maxHeight').value;
+        if (minH) { params.set('min_height', minH); }
+        if (maxH) { params.set('max_height', maxH); }
+        const status = document.getElementById('status').value;
+        if (status) { params.set('status', status); }
+
+        const btn = document.getElementById('queryBtn');
+        btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        try {
+            const resp = await fetch('/obstacle-compliance/api/properties/query/?' + params.toString());
+            const data = await resp.json();
+            if (!resp.ok) { throw new Error(data.error || 'Query failed'); }
+            document.getElementById('resultCount').textContent = data.count;
+            render(data.center, data.radius_km, data.results);
+            const body = document.getElementById('resultBody');
+            if (!data.results.length) {
+                body.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">No properties match the filters</td></tr>';
+                return;
+            }
+            body.innerHTML = data.results.map(function (r) {
+                return '<tr>' +
+                    '<td><a href="/obstacle-compliance/property-check/?lat=' + r.lat + '&lon=' + r.lon + '&height=' + r.height_m + '">' + escapeHtml(r.name) + '</a>' +
+                    (r.address ? '<div class="small text-muted">' + escapeHtml(r.address) + '</div>' : '') + '</td>' +
+                    '<td>' + r.height_m + ' m</td>' +
+                    '<td><span class="badge" style="background:' + (COLORS[r.status] || COLORS['None']) + ';">' + (r.status || '—') + '</span></td>' +
+                    '<td>' + (r.distance_km != null ? r.distance_km : '—') + '</td></tr>';
+            }).join('');
+        } catch (e) {
+            alert('Query error: ' + e.message);
+        } finally {
+            btn.disabled = false; btn.innerHTML = '<i class="fas fa-search"></i>';
+        }
+    }
+
+    document.getElementById('queryForm').addEventListener('submit', function (e) { e.preventDefault(); runQuery(); });
+    document.getElementById('resetBtn').addEventListener('click', function () {
+        document.getElementById('queryForm').reset();
+        clearLayers();
+        document.getElementById('resultCount').textContent = '0';
+        document.getElementById('resultBody').innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Run a query to see results</td></tr>';
+    });
+    document.getElementById('exportBtn').addEventListener('click', function () {
+        const rows = [...document.querySelectorAll('#resultBody tr')];
+        const csv = rows.map(function (tr) {
+            return [...tr.querySelectorAll('td')].map(function (td) {
+                return '"' + (td.textContent.trim().replace(/"/g, '""')) + '"';
+            }).join(',');
+        }).join('\n');
+        const a = document.createElement('a');
+        a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent('Name,Height,Status,Distance\n' + csv);
+        a.download = 'property_query_results.csv';
+        a.click();
+    });
+})();
+</script>
+{% endblock %}

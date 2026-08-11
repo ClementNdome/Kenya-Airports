@@ -3,7 +3,7 @@ from django.contrib import admin
 from leaflet.admin import LeafletGeoAdmin
 
 
-from .models import Aerodrome, AerodromeBuffer, UserProfile, Property, ComplianceCheck, Notification, ComplianceApplication, BulkUploadJob
+from .models import Aerodrome, AerodromeBuffer, UserProfile, Property, ComplianceCheck, Notification, ComplianceApplication, BulkUploadJob, AerodromeRunway, DeclaredDistance
 
 
 class Aerodromes(LeafletGeoAdmin):
@@ -67,3 +67,18 @@ class ComplianceApplicationAdmin(admin.ModelAdmin):
 class BulkUploadJobAdmin(admin.ModelAdmin):
     list_display = ('pk', 'user', 'status', 'total_rows', 'success_count', 'error_count', 'created_at')
     list_filter = ('status', 'created_at')
+
+
+@admin.register(AerodromeRunway)
+class AerodromeRunwayAdmin(LeafletGeoAdmin):
+    list_display = ('icao_code', 'runway_pair', 'rwy_designator_1', 'rwy_designator_2', 'length_declared_m', 'width_declared_m', 'strip_dimensions')
+    list_filter = ('icao_code',)
+    search_fields = ('icao_code', 'runway_pair')
+
+
+@admin.register(DeclaredDistance)
+class DeclaredDistanceAdmin(admin.ModelAdmin):
+    list_display = ('icao_code', 'runway_pair', 'tora_m_1', 'toda_m_1', 'asda_m_1', 'lda_m_1')
+    list_filter = ('icao_code',)
+    search_fields = ('icao_code', 'runway_pair')
+    readonly_fields = [f.name for f in DeclaredDistance._meta.fields]

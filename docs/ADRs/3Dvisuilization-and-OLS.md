@@ -1,0 +1,1 @@
+we should be able to render the map in 3D  and also see the buildings in 3D actually, let peple see the almost reality of things and how they are

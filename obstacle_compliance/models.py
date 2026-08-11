@@ -247,6 +247,130 @@ class AerodromeBuffer(models.Model):
 
 
 # ============================================
+# RUNWAY DATA (unmanaged — loaded externally)
+# ============================================
+
+class AerodromeRunway(models.Model):
+    """
+    Runway geometry for aerodromes. Unmanaged: the table exists in PostgreSQL
+    (public."aerodrome-runways") and was loaded externally. geom is the
+    centerline LineString (WGS84); thresholds/bearings are derived from it
+    at query time so stale coordinate fields never drift.
+    """
+    id = models.IntegerField(primary_key=True)
+    geom = models.LineStringField(srid=4326, null=True, blank=True)
+    gid = models.IntegerField(null=True, blank=True)
+    icao_code = models.CharField(max_length=30, null=True, blank=True)
+    country_name = models.CharField(max_length=100, null=True, blank=True)
+    runway_pair = models.CharField(max_length=20, null=True, blank=True)
+    rwy_designator_1 = models.CharField(max_length=10, null=True, blank=True)
+    rwy_designator_2 = models.CharField(max_length=10, null=True, blank=True)
+    thr_latitude_1_dms = models.CharField(max_length=50, null=True, blank=True)
+    thr_longitude_1_dms = models.CharField(max_length=50, null=True, blank=True)
+    thr_latitude_2_dms = models.CharField(max_length=50, null=True, blank=True)
+    thr_longitude_2_dms = models.CharField(max_length=50, null=True, blank=True)
+    thr_latitude_1 = models.FloatField(null=True, blank=True)
+    thr_longitude_1 = models.FloatField(null=True, blank=True)
+    thr_latitude_2 = models.FloatField(null=True, blank=True)
+    thr_longitude_2 = models.FloatField(null=True, blank=True)
+    thr_elevation_1_m = models.FloatField(null=True, blank=True)
+    thr_elevation_2_m = models.FloatField(null=True, blank=True)
+    thr_elevation_1_ft = models.FloatField(null=True, blank=True)
+    thr_elevation_2_ft = models.FloatField(null=True, blank=True)
+    true_bearing_1 = models.CharField(max_length=30, null=True, blank=True)
+    true_bearing_2 = models.CharField(max_length=30, null=True, blank=True)
+    mag_bearing_1 = models.CharField(max_length=30, null=True, blank=True)
+    mag_bearing_2 = models.CharField(max_length=30, null=True, blank=True)
+    dimensions_m = models.CharField(max_length=100, null=True, blank=True)
+    length_declared_m = models.FloatField(null=True, blank=True)
+    width_declared_m = models.CharField(max_length=50, null=True, blank=True)
+    strength_pcn_surface = models.CharField(max_length=200, null=True, blank=True)
+    slope_pct = models.CharField(max_length=30, null=True, blank=True)
+    swy_dimensions_m = models.CharField(max_length=100, null=True, blank=True)
+    cwy_dimensions_m = models.CharField(max_length=100, null=True, blank=True)
+    cwy_dimensions_m_2 = models.CharField(max_length=100, null=True, blank=True)
+    strip_dimensions = models.CharField(max_length=150, null=True, blank=True)
+    strip_dimensions_m = models.CharField(max_length=150, null=True, blank=True)
+    ofz = models.CharField(max_length=200, null=True, blank=True)
+    resa_dimensions_m = models.CharField(max_length=100, null=True, blank=True)
+    arresting_system = models.CharField(max_length=100, null=True, blank=True)
+    geoid_undulation_m = models.CharField(max_length=50, null=True, blank=True)
+    length_calculated_m = models.FloatField(null=True, blank=True)
+    length_difference_m = models.FloatField(null=True, blank=True)
+    length_difference_pct = models.CharField(max_length=30, null=True, blank=True)
+    remarks = models.CharField(max_length=300, null=True, blank=True)
+
+    class Meta:
+        managed = False
+        db_table = 'aerodrome-runways'
+        verbose_name = "Aerodrome Runway"
+        verbose_name_plural = "Aerodrome Runways"
+
+    def __str__(self):
+        return f"{self.icao_code} {self.runway_pair or ''}".strip()
+
+    @property
+    def aerodrome(self):
+        """Lookup helper — the runway table is linked to Aerodrome by icao_code."""
+        if not self.icao_code:
+            return None
+        return Aerodrome.objects.filter(icao_code=self.icao_code).first()
+
+    @property
+    def declared(self):
+        """Declared distances for this runway end pair (whitespace-padded join)."""
+        if not self.icao_code or not self.runway_pair:
+            return None
+        from django.db.models.functions import Trim
+        return DeclaredDistance.objects.filter(
+            icao_code=self.icao_code,
+        ).annotate(pair=Trim('runway_pair')).filter(pair=self.runway_pair.strip()).first()
+
+
+class DeclaredDistance(models.Model):
+    """
+    Declared distances (TORA/TODA/ASDA/LDA) per runway end. Unmanaged table
+    public."runways-declared_distances". runway_pair is whitespace-padded —
+    always compare via .strip()/__iexact against AerodromeRunway.runway_pair.
+    """
+    id = models.CharField(primary_key=True, max_length=50)
+    country = models.CharField(max_length=100, null=True, blank=True)
+    icao_code = models.CharField(max_length=30, null=True, blank=True)
+    runway_pair = models.CharField(max_length=30, null=True, blank=True)
+    rwy_designator_1 = models.CharField(max_length=10, null=True, blank=True)
+    rwy_designator_2 = models.CharField(max_length=10, null=True, blank=True)
+    tora_m_1 = models.CharField(max_length=20, null=True, blank=True)
+    toda_m_1 = models.CharField(max_length=20, null=True, blank=True)
+    asda_m_1 = models.CharField(max_length=20, null=True, blank=True)
+    lda_m_1 = models.CharField(max_length=20, null=True, blank=True)
+    remarks_1 = models.CharField(max_length=300, null=True, blank=True)
+    tora_m_2 = models.CharField(max_length=20, null=True, blank=True)
+    toda_m_2 = models.CharField(max_length=20, null=True, blank=True)
+    asda_m_2 = models.CharField(max_length=20, null=True, blank=True)
+    lda_m_2 = models.CharField(max_length=20, null=True, blank=True)
+    remarks_2 = models.CharField(max_length=300, null=True, blank=True)
+
+    class Meta:
+        managed = False
+        db_table = 'runways-declared_distances'
+        verbose_name = "Declared Distance"
+        verbose_name_plural = "Declared Distances"
+
+    def __str__(self):
+        return f"{self.icao_code} {self.runway_pair or ''}".strip()
+
+    def parse(self, field_name):
+        """Parse a declared distance field to meters (float) or None."""
+        raw = getattr(self, field_name, None)
+        if not raw:
+            return None
+        try:
+            return float(str(raw).strip())
+        except (TypeError, ValueError):
+            return None
+
+
+# ============================================
 # USER & PORTFOLIO MODELS (Feature 1)
 # ============================================
 
