@@ -7,6 +7,8 @@ from django.contrib.postgres.indexes import GistIndex  # Add this import
 import logging
 from django.contrib.gis.geos import MultiPolygon
 
+from . import projection
+
 class Aerodrome(models.Model):
     """Your exact model from the data - with targeted enhancements"""
     fid = models.IntegerField(primary_key=True)
@@ -135,11 +137,21 @@ class Aerodrome(models.Model):
         logger.warning(f"Could not parse elevation from: '{self.elevation_m_ft}' for airport {self.icao_code}")
         return None
     
-    # ==================== NEW METHOD ====================
-        # ==================== FIXED METHOD ====================
+    # Buffer type discriminators stored in AerodromeBuffer.type.
+    BUFFER_TYPE_ARP = 'arp'
+    BUFFER_TYPE_RUNWAY = 'runway'
+
+    @classmethod
+    def buffer_type_of(cls, buf_type):
+        """Normalise a stored AerodromeBuffer.type to 'runway' or 'arp'."""
+        if buf_type in (cls.BUFFER_TYPE_RUNWAY, 'runway_threshold'):
+            return cls.BUFFER_TYPE_RUNWAY
+        return cls.BUFFER_TYPE_ARP
+
     def get_or_create_buffer(self, radius_km):
         """Create a buffer for this aerodrome if it doesn't exist yet.
-        Uses proper projection for accuracy. Now handles NOT NULL geom correctly."""
+        True-metric circle around the ARP point, computed in the local UTM
+        zone (EPSG 32636/32637/32736/32737) instead of Web Mercator."""
         radius_km = int(radius_km)
         if not self.geom:
             logging.getLogger(__name__).warning(f"Aerodrome {self.icao_code} has no geometry")
@@ -147,10 +159,11 @@ class Aerodrome(models.Model):
 
         # === Step 1: Compute the accurate buffer geometry FIRST ===
         try:
-            geom_3857 = self.geom.transform(3857, clone=True)
-            buffered_3857 = geom_3857.buffer(radius_km * 1000)
-            area_km2 = round(buffered_3857.area / 1_000_000, 2)
-            geom_4326 = buffered_3857.transform(4326, clone=True)
+            buffered_4326 = projection.buffer_m(self.geom, radius_km * 1000)
+            if buffered_4326 is None:
+                return None
+            area_km2 = round(projection.area_m2(buffered_4326) / 1_000_000, 2)
+            geom_4326 = buffered_4326
             if geom_4326.geom_type == 'Polygon':
                 geom_4326 = MultiPolygon(geom_4326)
         except Exception as e:
@@ -160,7 +173,7 @@ class Aerodrome(models.Model):
         # === Step 2: Now get_or_create with FULL defaults (including geom) ===
         defaults = {
             'fid': None,
-            'type': self.type or "Aerodrome Buffer",
+            'type': self.BUFFER_TYPE_ARP,
             'latitude': self.latitude,
             'longitude': self.longitude,
             'latitude_decimal': self.geom.y,
@@ -199,6 +212,7 @@ class Aerodrome(models.Model):
     def runway_capsule(self, radius_km):
         """Stadium-shaped buffer around the runway centreline(s) - the
         runway-threshold buffer (HKNL 03/21: 3/5/10 km around thresholds).
+        Computed in the local UTM zone for true metric widths.
 
         Returns a WGS84 GEOS geometry (capsule around the union of runway
         lines) or None when this aerodrome has no runway geometry.
@@ -211,9 +225,15 @@ class Aerodrome(models.Model):
             radius_m = float(radius_km) * 1000.0
             caps = None
             for ln in lines:
-                b = ln.transform(3857, clone=True).buffer(radius_m)
+                b = projection.buffer_m(ln, radius_m)
+                if b is None:
+                    continue
                 caps = b if caps is None else caps.union(b)
-            return caps.transform(4326, clone=True)
+            if caps is None:
+                return None
+            if caps.geom_type == 'Polygon':
+                caps = MultiPolygon(caps)
+            return caps
         except Exception as exc:
             logging.getLogger(__name__).warning(
                 f"runway_capsule failed for {self.icao_code}: {exc}")
@@ -221,22 +241,18 @@ class Aerodrome(models.Model):
 
     def get_or_create_runway_threshold_buffer(self, radius_km):
         """Create/replace the ARP-circle buffer with the runway capsule for
-        this radius (3/5/10 km per HKNL 03/21). Returns the buffer or None."""
+        this radius (HKNL 03/21: 3/5/10 km). Returns the buffer or None."""
         caps = self.runway_capsule(radius_km)
         if caps is None:
             return None
         radius_km = int(radius_km)
         geom_4326 = caps
-        if geom_4326.geom_type == 'Polygon':
-            from django.contrib.gis.geos import MultiPolygon
-            geom_4326 = MultiPolygon(geom_4326)
-        geom_3857 = caps.transform(3857, clone=True)
-        area_km2 = round(geom_3857.area / 1_000_000, 2)
+        area_km2 = round(projection.area_m2(geom_4326) / 1_000_000, 2)
         defaults = {
-            'type': 'runway_threshold',
+            'type': self.BUFFER_TYPE_RUNWAY,
             'latitude_decimal': self.geom.y if self.geom else None,
             'longitude_decimal': self.geom.x if self.geom else None,
-            'layer': f"{radius_km}km_runway_threshold",
+            'layer': f"{radius_km}km_runway_capsule",
             'geom': geom_4326,
             'area_km2': area_km2,
         }
@@ -246,8 +262,19 @@ class Aerodrome(models.Model):
             defaults=defaults,
         )
         logging.getLogger(__name__).info(
-            f"🛫 Runway-threshold buffer {radius_km}km for {self.icao_code} (area: {area_km2} km²)")
+            f"🛫 Runway-capsule buffer {radius_km}km for {self.icao_code} (area: {area_km2} km²)")
         return buf
+
+    def get_or_create_any_buffer(self, radius_km, buffer_type):
+        """Dispatch a buffer request by type: 'runway' builds a capsule
+        around the runway lines (falling back to the ARP circle when the
+        aerodrome has no runway geometry); anything else builds the ARP
+        circle. Any radius is valid for either type."""
+        if buffer_type == self.BUFFER_TYPE_RUNWAY:
+            buf = self.get_or_create_runway_threshold_buffer(radius_km)
+            if buf is not None:
+                return buf
+        return self.get_or_create_buffer(radius_km)
     
 # new model for buffers - can be linked to Aerodrome via FK
 class AerodromeBuffer(models.Model):
