@@ -9,33 +9,38 @@
                     <h3 class="text-center mb-4"><i class="fas fa-user-plus me-2"></i>Create Account</h3>
                     <form method="post">
                         {% csrf_token %}
-                        {% if form.errors %}
+                        {% if form.non_field_errors %}
                             <div class="alert alert-danger">
-                                Please correct the errors below.
-                                {{ form.non_field_errors }}
+                                {% for error in form.non_field_errors %}{{ error }}{% endfor %}
                             </div>
                         {% endif %}
                         <div class="mb-3">
                             <label class="form-label">Username</label>
-                            <input type="text" name="username" class="form-control" required autofocus>
+                            <input type="text" name="username" class="form-control" value="{{ form.username.value|default:'' }}" required>
                             <small class="text-muted">Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only.</small>
-                            {{ form.username.errors }}
+                            {% for error in form.username.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Email</label>
+                            <input type="email" name="email" class="form-control" value="{{ form.email.value|default:'' }}" required autofocus>
+                            <small class="text-muted">Required. You must verify this email to activate your account.</small>
+                            {% for error in form.email.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Password</label>
                             <input type="password" name="password1" class="form-control" required>
                             <small class="text-muted">At least 8 characters. Not entirely numeric.</small>
-                            {{ form.password1.errors }}
+                            {% for error in form.password1.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Confirm Password</label>
                             <input type="password" name="password2" class="form-control" required>
-                            {{ form.password2.errors }}
+                            {% for error in form.password2.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                         </div>
                         <button type="submit" class="btn btn-primary w-100">Create Account</button>
                     </form>
                     <p class="text-center mt-3 mb-0">
-                        Already have an account? <a href="{% url 'obstacle_compliance:login' %}">Login</a>
+                        Already have an account? <a href="{% url 'obstacle_compliance:login' %}{% if request.GET.next %}?next={{ request.GET.next|urlencode }}{% endif %}">Login</a>
                     </p>
                 </div>
             </div>

@@ -100,6 +100,16 @@
             text-transform: uppercase;
         }
         
+        .quick-access-card {
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+            cursor: pointer;
+        }
+        
+        .quick-access-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.15);
+        }
+        
         .status-badge.success {
             background-color: rgba(25, 135, 84, 0.1);
             color: var(--success-color);
@@ -227,19 +237,6 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
-                    {% if user.is_authenticated %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'obstacle_compliance:user_dashboard' %}">
-                            <i class="fas fa-home me-1"></i> Dashboard
-                        </a>
-                    </li>
-                    {% else %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'obstacle_compliance:dashboard' %}">
-                            <i class="fas fa-home me-1"></i> Dashboard
-                        </a>
-                    </li>
-                    {% endif %}
                     <li class="nav-item">
                         <a class="nav-link" href="{% url 'obstacle_compliance:map_view' %}">
                             <i class="fas fa-map me-1"></i> Interactive Map
@@ -250,36 +247,10 @@
                             <i class="fas fa-building me-1"></i> Property Check
                         </a>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'obstacle_compliance:property_query' %}">
-                            <i class="fas fa-filter me-1"></i> Property Query
-                        </a>
-                    </li>
                     {% if user.is_authenticated %}
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'obstacle_compliance:property_list' %}">
-                            <i class="fas fa-list me-1"></i> My Properties
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'obstacle_compliance:application_list' %}">
-                            <i class="fas fa-file-alt me-1"></i> Applications
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'obstacle_compliance:bulk_list' %}">
-                            <i class="fas fa-upload me-1"></i> Bulk Upload
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'obstacle_compliance:analytics' %}">
-                            <i class="fas fa-chart-bar me-1"></i> Analytics
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link position-relative" href="{% url 'obstacle_compliance:notification_list' %}">
-                            <i class="fas fa-bell me-1"></i> Notifications
-                            <span id="unread-badge" class="badge rounded-pill bg-danger position-absolute top-0 start-100 translate-middle" style="font-size:0.6rem;">0</span>
+                        <a class="nav-link" href="{% url 'obstacle_compliance:user_dashboard' %}">
+                            <i class="fas fa-tachometer-alt me-1"></i> Dashboard
                         </a>
                     </li>
                     <li class="nav-item dropdown">
@@ -291,8 +262,13 @@
                                 <i class="fas fa-cog me-2"></i>Profile</a>
                             </li>
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{% url 'obstacle_compliance:logout' %}">
-                                <i class="fas fa-sign-out-alt me-2"></i>Logout</a>
+                            <li>
+                                <form method="post" action="{% url 'obstacle_compliance:logout' %}" class="m-0">
+                                    {% csrf_token %}
+                                    <button type="submit" class="dropdown-item" style="background:none;border:none;width:100%;text-align:left;">
+                                        <i class="fas fa-sign-out-alt me-2"></i>Logout
+                                    </button>
+                                </form>
                             </li>
                         </ul>
                     </li>
@@ -303,8 +279,8 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'obstacle_compliance:register' %}">
-                            <i class="fas fa-user-plus me-1"></i> Register
+                        <a class="nav-link" href="{% url 'obstacle_compliance:dashboard' %}">
+                            <i class="fas fa-tachometer-alt me-1"></i> Dashboard
                         </a>
                     </li>
                     {% endif %}

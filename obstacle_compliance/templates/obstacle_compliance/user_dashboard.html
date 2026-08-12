@@ -22,6 +22,66 @@
     </div>
   </div>
 
+  <!-- Quick access links -->
+  <div class="row g-2 mb-3">
+    <div class="col-6 col-md">
+      <a href="{% url 'obstacle_compliance:property_check' %}" class="text-decoration-none">
+        <div class="card h-100 text-center py-3 quick-access-card">
+          <div class="text-primary mb-1"><i class="fas fa-building fa-lg"></i></div>
+          <div class="small fw-semibold text-dark">Property Check</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-md">
+      <a href="{% url 'obstacle_compliance:property_list' %}" class="text-decoration-none">
+        <div class="card h-100 text-center py-3 quick-access-card">
+          <div class="text-primary mb-1"><i class="fas fa-list fa-lg"></i></div>
+          <div class="small fw-semibold text-dark">My Properties</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-md">
+      <a href="{% url 'obstacle_compliance:application_list' %}" class="text-decoration-none">
+        <div class="card h-100 text-center py-3 quick-access-card">
+          <div class="text-info mb-1"><i class="fas fa-file-alt fa-lg"></i></div>
+          <div class="small fw-semibold text-dark">Applications</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-md">
+      <a href="{% url 'obstacle_compliance:analytics' %}" class="text-decoration-none">
+        <div class="card h-100 text-center py-3 quick-access-card">
+          <div class="text-success mb-1"><i class="fas fa-chart-bar fa-lg"></i></div>
+          <div class="small fw-semibold text-dark">Analytics</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-md">
+      <a href="{% url 'obstacle_compliance:notification_list' %}" class="text-decoration-none">
+        <div class="card h-100 text-center py-3 quick-access-card">
+          <div class="text-warning mb-1"><i class="fas fa-bell fa-lg"></i></div>
+          <div class="small fw-semibold text-dark">Notifications</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-md">
+      <a href="{% url 'obstacle_compliance:bulk_list' %}" class="text-decoration-none">
+        <div class="card h-100 text-center py-3 quick-access-card">
+          <div class="text-dark mb-1"><i class="fas fa-upload fa-lg"></i></div>
+          <div class="small fw-semibold text-dark">Bulk Upload</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-md">
+      <a href="{% url 'obstacle_compliance:property_query' %}" class="text-decoration-none">
+        <div class="card h-100 text-center py-3 quick-access-card">
+          <div class="text-secondary mb-1"><i class="fas fa-filter fa-lg"></i></div>
+          <div class="small fw-semibold text-dark">Property Query</div>
+        </div>
+      </a>
+    </div>
+  </div>
+
   <!-- Stats cards -->
   <div class="row g-2 mb-3">
     <div class="col-6 col-md-3">

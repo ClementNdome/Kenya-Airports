@@ -57,7 +57,7 @@
                 {% endif %}
                 {% if application.reviewed_at %}
                 <li class="{% if application.status == 'approved' or application.status == 'rejected' %}fw-bold{% endif %}">
-                  <span class="timeline-badge">{{ application.status == 'approved' or application.status == 'rejected'|yesno:"4,3" }}</span>
+                  <span class="timeline-badge">{% if application.status == 'approved' or application.status == 'rejected' %}4{% else %}3{% endif %}</span>
                   <span>{% if application.status == 'approved' %}Approved ✅{% elif application.status == 'rejected' %}Rejected ❌{% endif %} — {{ application.reviewed_at|date:"Y-m-d H:i" }}</span>
                   {% if application.reviewer_notes %}<br><small class="text-muted">Notes: {{ application.reviewer_notes }}</small>{% endif %}
                 </li>
