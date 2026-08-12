@@ -1,0 +1,23 @@
+{% extends 'obstacle_compliance/base.html' %}
+{% block title %}Verify Your Email — KCAA OCS{% endblock %}
+{% block content %}
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-md-5">
+            <div class="card shadow-sm">
+                <div class="card-body p-4 text-center">
+                    <i class="fas fa-envelope-open-text text-primary fa-3x mb-3"></i>
+                    <h3 class="mb-3">Check your inbox</h3>
+                    {% if resend %}
+                        <p class="text-muted">We have re-sent the verification email. Please check your inbox (and spam folder) and click the link to activate your account.</p>
+                    {% else %}
+                        <p class="text-muted">A verification link has been sent to your email address. Click it to activate your account, then you can log in.</p>
+                    {% endif %}
+                    <p class="text-muted small">The link expires in 24 hours.</p>
+                    <a href="{% url 'obstacle_compliance:login' %}" class="btn btn-primary w-100">Go to Login</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
