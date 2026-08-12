@@ -25,6 +25,8 @@ urlpatterns = [
     path('map/', views.MapView.as_view(), name='map_view'),
     path('api/buffers.geojson', views.BufferGeoJSONView.as_view(), name='api_buffers'),
     path('api/airports.geojson', views.AirportGeoJSONView.as_view(), name='api_airports'),
+    path('api/runways.geojson', views.RunwaysGeoJSONView.as_view(), name='api_runways'),
+    path('api/ols.geojson', views.OLSGeoJSONView.as_view(), name='api_ols'),
     
     # Search & Geocoding
     path('api/search/', views.SearchView.as_view(), name='api_search'),
