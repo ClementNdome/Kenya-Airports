@@ -1,6 +1,18 @@
 # ADR: Map layer checker card + drop 15 km ARP circle buffer — deferred implementation
 
-Status: **Accepted (deferred)** · Date: 2026-08-12 · Applies to: `obstacle_compliance` (Kenya-Airports)
+Status: **Accepted (partially implemented)** · Date: 2026-08-12 · Applies to: `obstacle_compliance` (Kenya-Airports)
+
+> Update 2026-08-12: the radius portion of decision 2 is **done** — the 15 km preset
+> button is removed and the default radius is 10 km on `/map/` and the dashboard,
+> alongside the new Runway/Point buffer-type toggle (see
+> `ADR-projection-buffer-types.md`). The **layer-checker card and per-surface OLS
+> toggles remain deferred**.
+>
+> Update 2026-08-12: decision 3 is **done** — the source PDF was renamed to
+> `CAA-AC-AGA005C CONTROL OF OBSTACLES.pdf`, and `AGA005B` references were
+> updated to AGA005C in `utils.py`, `ols_surfaces.py`, `views.py` and
+> `OLS_VERIFICATION_MATRIX.md`. (The `?radius=15` API doc-link tweak at
+> `views.py:2067` is covered by decision 2's implementation.)
 
 ## Context
 

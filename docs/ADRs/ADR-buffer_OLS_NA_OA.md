@@ -4,6 +4,11 @@ This document records features and improvements explicitly deferred to future ph
 Created: 2026-07-30
 
 ---
+**IMPLEMENTED 2026-08-12 â UTM projection + buffer type selection**
+See `ADR-projection-buffer-types.md` in this folder for the full decision record.
+(Threshold buffers 3/5/10 km per HKNL 03/21 are now server-generated for any radius.)
+
+---
 threshold buffer 3/5/10 km eg for (HKNL 03/21)
 
 Server runway buffer unavailable.
