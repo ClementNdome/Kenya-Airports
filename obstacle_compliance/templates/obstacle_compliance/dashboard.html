@@ -78,6 +78,11 @@
                                     <span class="d-none d-sm-inline">OLS</span>
                                     <span class="badge bg-danger ms-1 status-indicator" style="display: none;">✓</span>
                                 </button>
+                                <button type="button" class="btn btn-outline-dark" id="toggleTerrain" title="Terrain penetrating OLS (nearest airport, DEM vs Annex 14 ceilings)">
+                                    <i class="fas fa-mountain me-1"></i>
+                                    <span class="d-none d-sm-inline">Terrain</span>
+                                    <span class="badge bg-dark ms-1 status-indicator" style="display: none;">✓</span>
+                                </button>
                             </div>
 
                             <!-- Basemap switcher dropdown -->
@@ -318,12 +323,14 @@
         var bufferLayer = L.layerGroup().addTo(map);
         var runwayLayer = L.layerGroup().addTo(map);
         var olsLayer = L.layerGroup();
+        var terrainLayer = L.layerGroup();
         
         // Track active layers
         var showAirports = true;
         var showBuffers = true;
         var showRunways = true;
         var showOls = false;
+        var showTerrain = false;
         var currentRadius = 15;
 
         // Add status indicators for layer toggles
@@ -332,6 +339,7 @@
             const bufferBtn = document.getElementById('toggleBuffers');
             const runwayBtn = document.getElementById('toggleRunways');
             const olsBtn = document.getElementById('toggleOls');
+            const terrainBtn = document.getElementById('toggleTerrain');
             
             if (showAirports) {
                 airportBtn.classList.add('active');
@@ -363,6 +371,16 @@
             } else {
                 olsBtn.classList.remove('active');
                 olsBtn.querySelector('.status-indicator').style.display = 'none';
+            }
+
+            if (terrainBtn) {
+                if (showTerrain) {
+                    terrainBtn.classList.add('active');
+                    terrainBtn.querySelector('.status-indicator').style.display = 'inline-block';
+                } else {
+                    terrainBtn.classList.remove('active');
+                    terrainBtn.querySelector('.status-indicator').style.display = 'none';
+                }
             }
         }
 
@@ -509,6 +527,62 @@
                 }
             }
         });
+
+        // Toggle terrain breach analysis (DEM vs OLS ceilings, nearest airport)
+        document.getElementById('toggleTerrain').addEventListener('click', function() {
+            showTerrain = !showTerrain;
+            updateLayerIndicators();
+
+            if (showTerrain) {
+                loadTerrainBreaches();
+            } else {
+                showToast('Terrain breach layer hidden', 'info');
+                if (map.hasLayer(terrainLayer)) {
+                    map.removeLayer(terrainLayer);
+                }
+            }
+        });
+
+        function loadTerrainBreaches() {
+            showToast('Computing terrain breaches ...', 'info');
+            const c = map.getCenter();
+            fetch(`/obstacle-compliance/api/airports/nearest/?lat=${c.lat.toFixed(5)}&lon=${c.lng.toFixed(5)}`)
+                .then(r => r.json())
+                .then(nearest => {
+                    if (!nearest.icao_code) return;
+                    return fetch(`/obstacle-compliance/api/terrain-breaches.geojson?icao=${nearest.icao_code}`)
+                        .then(r => r.json())
+                        .then(data => {
+                            if (map.hasLayer(terrainLayer)) map.removeLayer(terrainLayer);
+                            terrainLayer = L.layerGroup();
+                            L.geoJSON(data, {
+                                pointToLayer: function(f, latlng) {
+                                    return L.circleMarker(latlng, {
+                                        radius: 5.5,
+                                        color: '#ffffff', weight: 1,
+                                        fillColor: '#dc2626', fillOpacity: 0.9
+                                    });
+                                },
+                                onEachFeature: function(f, layer) {
+                                    const p = f.properties;
+                                    layer.bindPopup(
+                                        `<b>Terrain breach</b> — ${p.surface}<br>` +
+                                        `Terrain: ${p.terrain_m} m · Ceiling: ${p.ceiling_amsl} m<br>` +
+                                        `Penetration: <b>${p.breach_m} m</b>`
+                                    );
+                                }
+                            }).addTo(terrainLayer);
+                            if (!map.hasLayer(terrainLayer)) terrainLayer.addTo(map);
+                            const m = data.metadata || {};
+                            if (m.breach_count > 0) {
+                                showToast(`${m.breach_count} terrain breach(es) within OLS of ${m.icao_code}; worst ${m.worst_breach_m} m`, 'warning');
+                            } else {
+                                showToast(`No terrain breaches within OLS of ${m.icao_code} (${m.samples} DEM samples)`, 'success');
+                            }
+                        });
+                })
+                .catch(() => showToast('Terrain breach analysis unavailable', 'danger'));
+        }
         
         function loadRunways() {
             if (!showRunways) return;

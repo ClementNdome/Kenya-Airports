@@ -463,12 +463,12 @@
     <div class="map-controls">
         <div class="controls-row">
             <div class="control-group">
-                {% comment %} <button class="control-btn" data-radius="3">
+                <button class="control-btn" data-radius="3">
                     <i class="fas fa-circle" style="color: #FF6B6B;"></i> 3km
                 </button>
                 <button class="control-btn" data-radius="5">
                     <i class="fas fa-circle" style="color: #796f5c;"></i> 5km
-                </button> {% endcomment %}
+                </button>
                 <button class="control-btn" data-radius="10">
                     <i class="fas fa-circle" style="color: #2196F3;"></i> 10km
                 </button>
@@ -506,9 +506,18 @@
                 <button class="control-btn" id="toggleOls">
                     <i class="fas fa-chart-area"></i> OLS
                 </button>
+                <button class="control-btn" id="toggleTerrain" title="Terrain penetrating OLS (nearest airport, DEM vs Annex 14 ceilings)">
+                    <i class="fas fa-mountain"></i> Terrain
+                </button>
+                <button class="control-btn" id="toggleOls3d" title="Open the 3D OLS viewer (true Annex 14 slopes, terrain and buildings)">
+                    <i class="fas fa-cube"></i> 3D OLS
+                </button>
                 {% if user.is_authenticated %}
                 <button class="control-btn" id="toggleProperties">
                     <i class="fas fa-building"></i> My Props
+                </button>
+                <button class="control-btn" id="toggleMyLayers">
+                    <i class="fas fa-layers"></i> My Layers
                 </button>
                 {% endif %}
             </div>
@@ -526,6 +535,46 @@
     <!-- Coordinates Display -->
     <div class="coordinates-display" id="coordinatesDisplay">
         Move mouse to see coordinates
+    </div>
+
+    <!-- 3D OLS Viewer (Mapbox GL overlay) -->
+    <div id="ols3dOverlay" style="display:none; position:fixed; inset:0; z-index:1200; background:#0b1220;">
+        <div id="ols3dMap" style="position:absolute; inset:0;"></div>
+        <button class="btn btn-outline-light btn-sm position-absolute" id="ols3dExit"
+                style="top:12px; left:12px; z-index:2;">
+            <i class="fas fa-times me-1"></i>Exit 3D
+        </button>
+        <div class="position-absolute p-2 rounded" id="ols3dLegend"
+             style="top:12px; right:12px; z-index:2; background:rgba(15,23,42,.85); min-width:170px;">
+            <div class="small text-white fw-bold mb-1"><i class="fas fa-chart-area me-1"></i>OLS Surfaces</div>
+            <div id="ols3dLegendItems" class="small"></div>
+            <div class="mt-2 border-top pt-2" style="border-color:#334155!important;">
+                <button class="btn btn-sm btn-outline-info w-100" id="ols3dSimBtn">
+                    <i class="fas fa-plane me-1"></i>Flight Simulation
+                </button>
+                <div class="text-white-50 small mt-1" id="ols3dSimStatus" style="display:none;"></div>
+            </div>
+            <div class="mt-1 border-top pt-2" style="border-color:#334155!important;">
+                <label class="text-white small mb-1 d-flex align-items-center gap-2">
+                    <input type="checkbox" id="ols3dSkyline">
+                    <i class="fas fa-chart-line"></i> Skyline — max build height
+                </label>
+                <div id="ols3dSkyLegend" class="small text-center mb-1" style="display:none;">
+                    <div style="border-radius:4px; background:linear-gradient(90deg,#dc2626,#f59e0b,#10b981,#3b82f6); height:8px;"></div>
+                    <div class="d-flex justify-content-between text-white-50" style="font-size:10px;">
+                        <span>Restricted</span><span>Max allowed</span>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-2 border-top pt-2" style="border-color:#334155!important; display:none;" id="ols3dBuildRow">
+                <label class="text-white small mb-0"><input type="checkbox" id="ols3dBuildings" checked> Buildings</label>
+            </div>
+        </div>
+        <div class="position-absolute" id="ols3dLoading"
+             style="top:50%; left:50%; transform:translate(-50%,-50%); z-index:2; color:#fff; text-align:center;">
+            <div class="spinner-border text-info mb-2"></div>
+            <div class="small">Building 3D OLS scene…</div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -574,6 +623,8 @@
         var runwayLayer = L.layerGroup();
         var olsLayer = L.layerGroup();
         var propertiesLayer = L.layerGroup();
+        var terrainLayer = L.layerGroup();
+        var userLayersGroup = L.layerGroup();
         
         // Load initial data
         loadAirports();
@@ -723,6 +774,59 @@
                 map.removeLayer(olsLayer);
             }
         });
+
+        document.getElementById('toggleTerrain').addEventListener('click', function() {
+            this.classList.toggle('active');
+
+            if (this.classList.contains('active')) {
+                map.addLayer(terrainLayer);
+                loadTerrainBreaches();
+            } else {
+                map.removeLayer(terrainLayer);
+                showToast('Terrain breach layer hidden', 'info');
+            }
+        });
+
+        function loadTerrainBreaches() {
+            showToast('Computing terrain breaches ...', 'info');
+            const c = map.getCenter();
+            fetch(`/obstacle-compliance/api/airports/nearest/?lat=${c.lat.toFixed(5)}&lon=${c.lng.toFixed(5)}`)
+                .then(r => r.json())
+                .then(nearest => {
+                    if (!nearest.icao_code) return;
+                    return fetch(`/obstacle-compliance/api/terrain-breaches.geojson?icao=${nearest.icao_code}`)
+                        .then(r => r.json())
+                        .then(data => {
+                            if (map.hasLayer(terrainLayer)) map.removeLayer(terrainLayer);
+                            terrainLayer = L.layerGroup();
+                            L.geoJSON(data, {
+                                pointToLayer: function(f, latlng) {
+                                    return L.circleMarker(latlng, {
+                                        radius: 5.5,
+                                        color: '#ffffff', weight: 1,
+                                        fillColor: '#dc2626', fillOpacity: 0.9
+                                    });
+                                },
+                                onEachFeature: function(f, layer) {
+                                    const p = f.properties;
+                                    layer.bindPopup(
+                                        `<b>Terrain breach</b> — ${p.surface}<br>` +
+                                        `Terrain: ${p.terrain_m} m · Ceiling: ${p.ceiling_amsl} m<br>` +
+                                        `Penetration: <b>${p.breach_m} m</b>`
+                                    );
+                                }
+                            }).addTo(terrainLayer);
+                            if (!map.hasLayer(terrainLayer)) terrainLayer.addTo(map);
+                            const m = data.metadata || {};
+                            if (m.breach_count > 0) {
+                                showToast(`${m.breach_count} terrain breach(es) within OLS of ${m.icao_code}; worst ${m.worst_breach_m} m`, 'warning');
+                            } else {
+                                showToast(`No terrain breaches within OLS of ${m.icao_code} (${m.samples} DEM samples)`, 'success');
+                            }
+                        });
+                })
+                .catch(() => showToast('Terrain breach analysis unavailable', 'danger'));
+        }
         
         {% if user.is_authenticated %}
         var toggleProperties = document.getElementById('toggleProperties');
@@ -737,6 +841,71 @@
                 }
             });
         }
+
+        var toggleMyLayers = document.getElementById('toggleMyLayers');
+        if (toggleMyLayers) {
+            toggleMyLayers.addEventListener('click', function() {
+                this.classList.toggle('active');
+                if (this.classList.contains('active')) {
+                    map.addLayer(userLayersGroup);
+                    loadUserLayers();
+                } else {
+                    map.removeLayer(userLayersGroup);
+                }
+            });
+        }
+
+        function loadUserLayers() {
+            fetch('/obstacle-compliance/api/user-layers.geojson')
+                .then(r => r.json())
+                .then(data => {
+                    if (map.hasLayer(userLayersGroup)) map.removeLayer(userLayersGroup);
+                    userLayersGroup = L.layerGroup();
+                    const feats = data.features || [];
+                    L.geoJSON(feats, {
+                        pointToLayer: function(feature, latlng) {
+                            return L.circleMarker(latlng, {
+                                radius: 6, color: '#fff', weight: 1.5,
+                                fillColor: '#7c3aed', fillOpacity: 0.85
+                            });
+                        },
+                        style: function(feature) {
+                            const t = feature.properties.layer_type;
+                            return {
+                                color: t === 'check_result' ? '#dc2626' : t === 'buffer' ? '#2563eb' : '#7c3aed',
+                                weight: 2, dashArray: '3 3', fillOpacity: 0.12
+                            };
+                        },
+                        onEachFeature: function(feature, layer) {
+                            const p = feature.properties;
+                            layer.bindPopup(
+                                `<div class="small">
+                                    <b>${p.name || 'Layer'}</b>
+                                    <span class="badge bg-secondary">${p.layer_type || ''}</span>
+                                    <br><small class="text-muted">${p.created_at ? new Date(p.created_at).toLocaleString() : ''}</small>
+                                    <br><button class="btn btn-sm btn-outline-danger mt-2" data-del-layer="${p.id}">
+                                        <i class="fas fa-trash"></i> Delete
+                                    </button>
+                                </div>`
+                            );
+                        }
+                    }).addTo(userLayersGroup);
+                    if (!map.hasLayer(userLayersGroup)) userLayersGroup.addTo(map);
+                    showToast(feats.length ? `${feats.length} saved layer(s) loaded` : 'No saved layers yet — save results from the compliance check page', feats.length ? 'success' : 'info');
+                });
+        }
+
+        document.addEventListener('click', function(e) {
+            const del = e.target.closest('[data-del-layer]');
+            if (!del) return;
+            const layerId = del.dataset.delLayer;
+            fetch(`/obstacle-compliance/api/user-layers/${layerId}/delete/`, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': '{{ csrf_token }}' },
+            })
+            .then(r => r.json())
+            .then(() => { showToast('Layer deleted', 'success'); loadUserLayers(); });
+        });
         {% endif %}
         
         // ============================================
@@ -935,7 +1104,8 @@
                                 weight: 2,
                                 opacity: 0.8,
                                 fillColor: feature.properties.fill,
-                                fillOpacity: 0.15
+                                fillOpacity: 0.15,
+                                dashArray: feature.properties.buffer_type === 'runway_threshold' ? '7 4' : undefined
                             };
                         },
                         onEachFeature: function(feature, layer) {
@@ -945,7 +1115,8 @@
                                     <h6 class="mb-1">${props.airport_name}</h6>
                                     <p class="small mb-1">
                                         <strong>ICAO:</strong> ${props.airport_icao}<br>
-                                        <strong>Buffer:</strong> ${props.radius_km}km<br>
+                                        <strong>Buffer:</strong> ${props.radius_km}km
+                                        ${props.buffer_type === 'runway_threshold' ? '<span class="badge bg-info ms-1">runway</span>' : ''}<br>
                                         ${props.area_km2 ? `<strong>Area:</strong> ${props.area_km2} km²` : ''}
                                     </p>
                                 </div>
@@ -1199,6 +1370,386 @@
         var tp = document.getElementById('toggleProperties');
         if (tp) tp.classList.add('active');
         {% endif %}
+
+        // ============================================
+        // 3D OLS VIEWER (true sloped Annex 14 surfaces)
+        // ============================================
+
+        const ols3dButton = document.getElementById('toggleOls3d');
+        if (ols3dButton) {
+            const MAPBOX_TOKEN = "{{ mapbox_token|default:'' }}";
+            const SURFACE_META = {
+                approach:          { label: 'Approach',          color: '#ef4444' },
+                take_off:          { label: 'Take-off climb',    color: '#f97316' },
+                inner_approach:    { label: 'Inner approach',    color: '#a855f7' },
+                balked_landing:    { label: 'Balked landing',    color: '#ec4899' },
+                transitional:      { label: 'Transitional',      color: '#14b8a6' },
+                inner_horizontal:  { label: 'Inner horizontal',  color: '#3b82f6' },
+                conical:           { label: 'Conical',           color: '#10b981' },
+                outer_horizontal:  { label: 'Outer horizontal',  color: '#84cc16' },
+                strip:             { label: 'Strip',             color: '#f59e0b' },
+            };
+            let glScene = null;
+            let glStyleReady = false;
+            let legendBuilt = false;
+            let glIcao = null;
+            const glSim = { data: null, t: 0, playing: false, last: 0, raf: null };
+
+            function loadMapboxGL(cb) {
+                if (window.mapboxgl) { cb(); return; }
+                if (!document.getElementById('mapbox-gl-js')) {
+                    const css = document.createElement('link');
+                    css.id = 'mapbox-gl-css'; css.rel = 'stylesheet';
+                    css.href = 'https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.css';
+                    document.head.appendChild(css);
+                    const s = document.createElement('script');
+                    s.id = 'mapbox-gl-js';
+                    s.src = 'https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.js';
+                    s.onload = cb;
+                    document.head.appendChild(s);
+                } else {
+                    window.setTimeout(cb, 50);
+                }
+            }
+
+            function buildLegend() {
+                if (legendBuilt) return;
+                legendBuilt = true;
+                const box = document.getElementById('ols3dLegendItems');
+                box.innerHTML = '';
+                Object.entries(SURFACE_META).forEach(([key, s]) => {
+                    const label = document.createElement('label');
+                    label.className = 'text-white small mb-1 d-flex align-items-center gap-2';
+                    label.innerHTML = `<input type="checkbox" data-surface="${key}" checked>
+                        <span class="d-inline-block" style="width:10px;height:10px;border-radius:2px;background:${s.color}"></span>
+                        ${s.label}`;
+                    label.querySelector('input').addEventListener('change', function() {
+                        const lid = 'ols_ext_' + key;
+                        if (glScene && glStyleReady && glScene.getLayer(lid)) {
+                            glScene.setLayoutProperty(lid, 'visibility', this.checked ? 'visible' : 'none');
+                        }
+                    });
+                    box.appendChild(label);
+                });
+                const buildings = document.getElementById('ols3dBuildings');
+                if (buildings) {
+                    buildings.addEventListener('change', function() {
+                        if (glScene && glScene.getLayer('ols3d-buildings')) {
+                            glScene.setLayoutProperty('ols3d-buildings', 'visibility', this.checked ? 'visible' : 'none');
+                        }
+                    });
+                }
+            }
+
+            function open3dViewer() {
+                if (!MAPBOX_TOKEN) {
+                    showToast('3D viewer requires a Mapbox token (MAPBOX_PUBLIC_ACCESS_TOKEN)', 'error');
+                    return;
+                }
+                const overlay = document.getElementById('ols3dOverlay');
+                overlay.style.display = 'block';
+                document.getElementById('ols3dLoading').style.display = 'block';
+                buildLegend();
+
+                loadMapboxGL(function() {
+                    mapboxgl.accessToken = MAPBOX_TOKEN;
+                    const c = map.getCenter();
+                    if (glScene) { glScene.remove(); glScene = null; glStyleReady = false; }
+                    glScene = new mapboxgl.Map({
+                        container: 'ols3dMap',
+                        style: 'mapbox://styles/mapbox/satellite-v9',
+                        center: [c.lng, c.lat],
+                        zoom: Math.max(map.getZoom(), 11),
+                        pitch: 55,
+                        bearing: -25,
+                        attributionControl: true
+                    });
+                    glScene.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }));
+                    glScene.on('load', function() {
+                        glStyleReady = true;
+                        document.getElementById('ols3dLoading').style.display = 'none';
+                        glScene.addSource('mapbox-dem', {
+                            type: 'raster-dem',
+                            url: 'mapbox://mapbox.terrain-rgb-v2',
+                            tileSize: 512,
+                            maxzoom: 14
+                        });
+                        glScene.setTerrain({ source: 'mapbox-dem', exaggeration: 1.2 });
+                        glScene.addLayer({ id: 'ols3d-sky', type: 'sky',
+                            paint: { 'sky-type': 'atmosphere', 'sky-atmosphere-sun-intensity': 0.6 } });
+
+                        glScene.addSource('ols3d-buildings', {
+                            type: 'vector', url: 'mapbox://mapbox.mapbox-streets-v8'
+                        });
+                        glScene.addLayer({
+                            id: 'ols3d-buildings',
+                            type: 'fill-extrusion',
+                            source: 'ols3d-buildings',
+                            'source-layer': 'building',
+                            paint: {
+                                'fill-extrusion-color': '#d0d2d6',
+                                'fill-extrusion-height': ['coalesce', ['get', 'height'], 10],
+                                'fill-extrusion-base': ['coalesce', ['get', 'min_height'], 0],
+                                'fill-extrusion-opacity': 0.75
+                            },
+                            layout: { visibility: document.getElementById('ols3dBuildings').checked ? 'visible' : 'none' }
+                        });
+
+                        // OLS: true Annex 14 slopes as stepped fill-extrusions
+                        const c2 = map.getCenter();
+                        fetch(`/obstacle-compliance/api/airports/nearest/?lat=${c2.lat.toFixed(5)}&lon=${c2.lng.toFixed(5)}`)
+                            .then(r => r.json())
+                            .then(nearest => {
+                                if (!nearest.icao_code) throw new Error('no airport');
+                                glIcao = nearest.icao_code;
+                                return fetch(`/obstacle-compliance/api/ols.geojson?icao=${nearest.icao_code}`)
+                                    .then(r => r.json())
+                                    .then(fc => {
+                                        if (!glScene.getSource('ols3d')) {
+                                            glScene.addSource('ols3d', { type: 'geojson', data: fc });
+                                            Object.entries(SURFACE_META).forEach(([key, s]) => {
+                                                glScene.addLayer({
+                                                    id: 'ols_ext_' + key,
+                                                    type: 'fill-extrusion',
+                                                    source: 'ols3d',
+                                                    filter: ['==', ['get', 'surface'], key],
+                                                    paint: {
+                                                        'fill-extrusion-color': s.color,
+                                                        'fill-extrusion-height': ['get', 'height_m'],
+                                                        'fill-extrusion-base': 0,
+                                                        'fill-extrusion-opacity': 0.35
+                                                    }
+                                                });
+                                            });
+                                            glScene.moveLayer('ols_ext_outer_horizontal', 'ols3d-sky');
+                                            showToast(`3D OLS for ${nearest.icao_code} — toggle surfaces in the legend`, 'success');
+                                        }
+                                    });
+                            })
+                            .catch(err => {
+                                console.error('3D OLS failed', err);
+                                showToast('Could not load OLS data for this area', 'error');
+                                document.getElementById('ols3dLoading').style.display = 'none';
+                            });
+                    });
+                    glScene.on('error', function(e) {
+                        console.error('3D map error', e);
+                    });
+                });
+            }
+
+            ols3dButton.addEventListener('click', function() {
+                ols3dButton.classList.toggle('active');
+                if (!ols3dButton.classList.contains('active')) {
+                    document.getElementById('ols3dOverlay').style.display = 'none';
+                    showToast('3D OLS viewer closed', 'info');
+                } else {
+                    open3dViewer();
+                }
+            });
+
+            document.getElementById('ols3dExit').addEventListener('click', function() {
+                ols3dButton.classList.remove('active');
+                document.getElementById('ols3dOverlay').style.display = 'none';
+                if (glSim.raf) cancelAnimationFrame(glSim.raf);
+                glSim.playing = false;
+            });
+
+            // ---- Flight simulation (4D flyover into the OLS) ----
+            const simBtn = document.getElementById('ols3dSimBtn');
+            const simStatus = document.getElementById('ols3dSimStatus');
+            simBtn.addEventListener('click', function() {
+                if (!glIcao) { showToast('Load an airport first (enter 3D OLS)', 'warning'); return; }
+                if (glSim.playing) {
+                    glSim.playing = false;
+                    if (glSim.raf) cancelAnimationFrame(glSim.raf);
+                    simBtn.innerHTML = '<i class="fas fa-play me-1"></i>Resume';
+                    simStatus.textContent = 'Paused';
+                    return;
+                }
+                if (!glSim.data) {
+                    showToast(`Loading flight path for ${glIcao}…`, 'info');
+                    fetch(`/obstacle-compliance/api/flyover.geojson?icao=${glIcao}`)
+                        .then(r => r.json())
+                        .then(fc => {
+                            if (fc.metadata && fc.metadata.error) throw new Error(fc.metadata.error);
+                            glSim.data = fc;
+                            addSimLayers();
+                            startSim();
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            showToast('Flight sim data error: ' + err.message, 'error');
+                        });
+                    return;
+                }
+                startSim();
+            });
+
+            function simColor(status) {
+                return status === 'breach' ? '#ef4444' : status === 'warn' ? '#fbbf24' : '#ffffff';
+            }
+
+            function addSimLayers() {
+                const fc = glSim.data;
+                if (!glScene.getSource('sim-path')) {
+                    glScene.addSource('sim-path', { type: 'geojson', data: fc });
+                    glScene.addLayer({
+                        id: 'sim-path-base', type: 'line', source: 'sim-path',
+                        paint: { 'line-color': '#ffffff', 'line-opacity': 0.25, 'line-width': 3 },
+                        layout: { 'line-cap': 'round' }
+                    });
+                    glScene.addLayer({
+                        id: 'sim-path-status', type: 'line', source: 'sim-path',
+                        paint: {
+                            'line-color': ['match', ['get', 'status'],
+                                'breach', '#ef4444', 'warn', '#fbbf24', '#ffffff'],
+                            'line-width': 7, 'line-opacity': 0.95
+                        },
+                        layout: { 'line-cap': 'round' }
+                    });
+                    glScene.moveLayer('sim-path-status', 'ols3d-sky');
+                }
+                if (!glScene.getSource('sim-aircraft')) {
+                    const empty = { type: 'FeatureCollection', features: [] };
+                    glScene.addSource('sim-aircraft', { type: 'geojson', data: empty });
+                    glScene.addLayer({
+                        id: 'sim-aircraft-shadow', type: 'circle', source: 'sim-aircraft',
+                        paint: {
+                            'circle-radius': 6,
+                            'circle-color': ['get', 'status_color'],
+                            'circle-opacity': 0.35
+                        }
+                    });
+                    glScene.addLayer({
+                        id: 'sim-aircraft-box', type: 'fill-extrusion', source: 'sim-aircraft',
+                        filter: ['==', ['geometry-type'], 'Polygon'],
+                        paint: {
+                            'fill-extrusion-color': ['get', 'status_color'],
+                            'fill-extrusion-height': ['get', 'box_h'],
+                            'fill-extrusion-base': 0,
+                            'fill-extrusion-opacity': 0.95
+                        }
+                    });
+                }
+                glScene.flyTo({
+                    center: fc.metadata.threshold,
+                    zoom: Math.max(glScene.getZoom(), 11.5),
+                    pitch: 62, bearing: (glScene.getBearing() + 15) % 360,
+                    duration: 1400
+                });
+            }
+
+            function startSim() {
+                const meta = glSim.data.metadata;
+                const n = meta.points;
+                glSim.t = 0;
+                glSim.playing = true;
+                glSim.last = performance.now();
+                simBtn.innerHTML = '<i class="fas fa-pause me-1"></i>Pause';
+                simStatus.style.display = 'block';
+                function frame(now) {
+                    if (!glSim.playing) return;
+                    const dt = Math.min((now - glSim.last) / 1000, 0.1);
+                    glSim.last = now;
+                    glSim.t += dt * meta.speed_mps;
+                    const total = meta.total_m;
+                    if (glSim.t > total) glSim.t = 0;  // loop
+                    const step = meta.step_m;
+                    let i = Math.min(Math.floor(glSim.t / step), n - 2);
+                    if (i < 0) i = 0;
+                    const frac = (glSim.t - i * step) / step;
+                    const coords = glSim.data.features[0].geometry.coordinates;
+                    const cA = coords[i], cB = coords[i + 1];
+                    const lon = cA[0] + (cB[0] - cA[0]) * frac;
+                    const lat = cA[1] + (cB[1] - cA[1]) * frac;
+                    const agl = meta.agls[i] + (meta.agls[i + 1] - meta.agls[i]) * frac;
+                    const status = meta.statuses[i];
+                    // small extruded aircraft box + ground shadow
+                    const dLon = 0.0009, dLat = 0.0009;
+                    glScene.getSource('sim-aircraft').setData({
+                        type: 'FeatureCollection',
+                        features: [
+                            { type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] },
+                              properties: { status_color: simColor(status) } },
+                            { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[
+                                [lon - dLon, lat - dLat], [lon + dLon, lat - dLat],
+                                [lon + dLon, lat + dLat], [lon - dLon, lat + dLat],
+                                [lon - dLon, lat - dLat]]] },
+                              properties: { status_color: simColor(status), box_h: 22 } }
+                        ]
+                    });
+                    simStatus.innerHTML = `<span style="color:${simColor(status)}">●</span> ` +
+                        `RWY ${meta.runway} · ${agl.toFixed(0)} m AGL ` +
+                        (status === 'breach' ? ' — BELOW OLS (breach)' :
+                         status === 'warn' ? ' — entering OLS' : ' — above OLS');
+                    glSim.raf = requestAnimationFrame(frame);
+                }
+                glSim.raf = requestAnimationFrame(frame);
+            }
+
+            // ---- Skyline: max allowed building height across the map ----
+            const skyBtn = document.getElementById('ols3dSkyline');
+            const skyLegend = document.getElementById('ols3dSkyLegend');
+            skyBtn.addEventListener('change', function() {
+                if (!glIcao) {
+                    showToast('Load an airport first (enter 3D OLS)', 'warning');
+                    this.checked = false;
+                    return;
+                }
+                skyLegend.style.display = this.checked ? 'block' : 'none';
+                if (!this.checked) {
+                    if (glScene) {
+                        if (glScene.getLayer('skyline-heat')) glScene.setLayoutProperty('skyline-heat', 'visibility', 'none');
+                        if (glScene.getLayer('skyline-ext')) glScene.setLayoutProperty('skyline-ext', 'visibility', 'none');
+                    }
+                    return;
+                }
+                if (glScene && glScene.getLayer('skyline-heat')) {
+                    glScene.setLayoutProperty('skyline-heat', 'visibility', 'visible');
+                    glScene.setLayoutProperty('skyline-ext', 'visibility', 'visible');
+                    return;
+                }
+                showToast('Computing skyline (max build height grid)…', 'info');
+                fetch(`/obstacle-compliance/api/skyline.geojson?icao=${glIcao}&step=1000`)
+                    .then(r => r.json())
+                    .then(g => {
+                        if (g.metadata && g.metadata.error) throw new Error(g.metadata.error);
+                        if (!glScene.getSource('skyline')) {
+                            glScene.addSource('skyline', { type: 'geojson', data: g });
+                            glScene.addLayer({
+                                id: 'skyline-heat', type: 'heatmap', source: 'skyline',
+                                paint: {
+                                    'heatmap-weight': ['interpolate', ['linear'], ['get', 'max_height_agl'],
+                                        -1, 0, 0, 1, 50, 0.7, 150, 0.35, 400, 0.02],
+                                    'heatmap-intensity': 1.1,
+                                    'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 10, 22, 14, 55],
+                                    'heatmap-opacity': 0.7,
+                                    'heatmap-color': [
+                                        'interpolate', ['linear'], ['heatmap-density'],
+                                        0, 'rgba(16,185,129,0)', 0.15, '#10b981', 0.45, '#f59e0b',
+                                        0.8, '#dc2626', 1, 'rgba(220,38,38,0.95)'
+                                    ]
+                                }
+                            });
+                            glScene.addLayer({
+                                id: 'skyline-ext', type: 'fill-extrusion', source: 'skyline',
+                                paint: {
+                                    'fill-extrusion-height': ['get', 'max_height_agl'],
+                                    'fill-extrusion-base': 0,
+                                    'fill-extrusion-color': ['interpolate', ['linear'], ['get', 'max_height_agl'],
+                                        0, '#dc2626', 50, '#f59e0b', 150, '#10b981', 400, '#3b82f6'],
+                                    'fill-extrusion-opacity': 0.15
+                                }
+                            });
+                        }
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        showToast('Skyline error: ' + err.message, 'error');
+                    });
+            });
+        }
     });
 </script>
 {% endblock %}

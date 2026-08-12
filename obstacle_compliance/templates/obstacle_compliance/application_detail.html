@@ -21,6 +21,19 @@
                 <tr><th>Certificate #</th><td>{{ application.certificate_number|default:"—" }}</td></tr>
                 <tr><th>Valid Until</th><td>{{ application.valid_until|date:"Y-m-d"|default:"—" }}</td></tr>
                 <tr><th>Fee Paid</th><td>{% if application.fee_paid %}<i class="fas fa-check text-success"></i>{% else %}<i class="fas fa-times text-danger"></i>{% endif %}</td></tr>
+                {% if application.last_checked %}
+                <tr><th>OLS Verdict</th>
+                  <td>
+                    <span class="badge {% if application.last_status == 'RED' %}bg-danger{% elif application.last_status == 'YELLOW' %}bg-warning text-dark{% else %}bg-success{% endif %}">
+                      {{ application.last_status|default:"—" }}
+                    </span>
+                    <small class="text-muted"> ({{ application.last_checked|date:"Y-m-d H:i" }})</small>
+                    {% if application.last_ceiling_amsl is not None %}
+                    <br><small>Ceiling: {{ application.last_ceiling_amsl }} m · Headroom: {{ application.last_headroom_m }} m</small>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endif %}
               </table>
             </div>
             <div class="col-md-6">
