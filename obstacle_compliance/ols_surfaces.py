@@ -6,8 +6,14 @@
 # Advisory Circular CAA-AC-AGA005C (Control of Obstacles).
 #
 # All slope/height/length numbers below are transcribed directly from the
-# ICAO tables. "inner_edge" values are half-widths (each side of the centre
-# line), as Annex 14 defines the inner edge length per side.
+# ICAO tables. Tables 4-1/4-2 give "length of inner edge" and "width" as FULL
+# cross-runway lengths; the engine stores the half-width (each side of the
+# centre line), i.e. HALF the table value. Cross-checks: Table 4-1
+# non-instrument inner edges equal the strip widths (3.4.9 / 3-1: 60/80/150/
+# 150 m full); 3.4.7 (no fixed object within 60 m of the centre line for
+# precision 3/4) pins the 120 m inner-approach width as full; Table 4-2
+# final widths (60 + 2 x 10% x 1600 = 380 m) only reconcile with full-length
+# semantics.
 import math
 
 from geopy.distance import geodesic
@@ -100,46 +106,47 @@ CONICAL_HEIGHT = {
 # Approach surface. first/second are (length_m, slope); horizontal is the
 # length of the horizontal section; total is the overall surface length.
 # Distances measured from the inner edge; inner edge lies "distance from
-# threshold" before the threshold.
+# threshold" before the threshold. inner_edge is the HALF-width (each side of
+# the centre line): half of the table's full "length of inner edge".
 APPROACH = {
     'non_instrument': {
-        1: dict(inner_edge=60.0, dist_from_thr=30.0, divergence=0.10,
+        1: dict(inner_edge=30.0, dist_from_thr=30.0, divergence=0.10,
                 first=(1600.0, 0.05), second=None, horizontal=0.0, total=1600.0),
-        2: dict(inner_edge=80.0, dist_from_thr=60.0, divergence=0.10,
+        2: dict(inner_edge=40.0, dist_from_thr=60.0, divergence=0.10,
                 first=(2500.0, 0.04), second=None, horizontal=0.0, total=2500.0),
-        3: dict(inner_edge=150.0, dist_from_thr=60.0, divergence=0.10,
+        3: dict(inner_edge=75.0, dist_from_thr=60.0, divergence=0.10,
                 first=(3000.0, 0.0333), second=None, horizontal=0.0, total=3000.0),
-        4: dict(inner_edge=150.0, dist_from_thr=60.0, divergence=0.10,
+        4: dict(inner_edge=75.0, dist_from_thr=60.0, divergence=0.10,
                 first=(3000.0, 0.025), second=None, horizontal=0.0, total=3000.0),
     },
     'non_precision': {
-        1: dict(inner_edge=140.0, dist_from_thr=60.0, divergence=0.15,
+        1: dict(inner_edge=70.0, dist_from_thr=60.0, divergence=0.15,
                 first=(2500.0, 0.0333), second=None, horizontal=0.0, total=2500.0),
-        2: dict(inner_edge=140.0, dist_from_thr=60.0, divergence=0.15,
+        2: dict(inner_edge=70.0, dist_from_thr=60.0, divergence=0.15,
                 first=(2500.0, 0.0333), second=None, horizontal=0.0, total=2500.0),
-        3: dict(inner_edge=280.0, dist_from_thr=60.0, divergence=0.15,
+        3: dict(inner_edge=140.0, dist_from_thr=60.0, divergence=0.15,
                 first=(3000.0, 0.02), second=(3600.0, 0.025), horizontal=8400.0, total=15000.0),
-        4: dict(inner_edge=280.0, dist_from_thr=60.0, divergence=0.15,
+        4: dict(inner_edge=140.0, dist_from_thr=60.0, divergence=0.15,
                 first=(3000.0, 0.02), second=(3600.0, 0.025), horizontal=8400.0, total=15000.0),
     },
     'precision_i': {
-        1: dict(inner_edge=140.0, dist_from_thr=60.0, divergence=0.15,
+        1: dict(inner_edge=70.0, dist_from_thr=60.0, divergence=0.15,
                 first=(3000.0, 0.025), second=(12000.0, 0.03), horizontal=0.0, total=15000.0),
-        2: dict(inner_edge=140.0, dist_from_thr=60.0, divergence=0.15,
+        2: dict(inner_edge=70.0, dist_from_thr=60.0, divergence=0.15,
                 first=(3000.0, 0.025), second=(12000.0, 0.03), horizontal=0.0, total=15000.0),
-        3: dict(inner_edge=280.0, dist_from_thr=60.0, divergence=0.15,
+        3: dict(inner_edge=140.0, dist_from_thr=60.0, divergence=0.15,
                 first=(3000.0, 0.02), second=(3600.0, 0.025), horizontal=8400.0, total=15000.0),
-        4: dict(inner_edge=280.0, dist_from_thr=60.0, divergence=0.15,
+        4: dict(inner_edge=140.0, dist_from_thr=60.0, divergence=0.15,
                 first=(3000.0, 0.02), second=(3600.0, 0.025), horizontal=8400.0, total=15000.0),
     },
     'precision_ii_iii': {
-        1: dict(inner_edge=140.0, dist_from_thr=60.0, divergence=0.15,
+        1: dict(inner_edge=70.0, dist_from_thr=60.0, divergence=0.15,
                 first=(3000.0, 0.025), second=(12000.0, 0.03), horizontal=0.0, total=15000.0),
-        2: dict(inner_edge=140.0, dist_from_thr=60.0, divergence=0.15,
+        2: dict(inner_edge=70.0, dist_from_thr=60.0, divergence=0.15,
                 first=(3000.0, 0.025), second=(12000.0, 0.03), horizontal=0.0, total=15000.0),
-        3: dict(inner_edge=280.0, dist_from_thr=60.0, divergence=0.15,
+        3: dict(inner_edge=140.0, dist_from_thr=60.0, divergence=0.15,
                 first=(3000.0, 0.02), second=(3600.0, 0.025), horizontal=8400.0, total=15000.0),
-        4: dict(inner_edge=280.0, dist_from_thr=60.0, divergence=0.15,
+        4: dict(inner_edge=140.0, dist_from_thr=60.0, divergence=0.15,
                 first=(3000.0, 0.02), second=(3600.0, 0.025), horizontal=8400.0, total=15000.0),
     },
 }
@@ -147,26 +154,29 @@ APPROACH = {
 # Transitional surface slope per code number (20% code 1/2, 14.3% code 3/4)
 TRANSITIONAL_SLOPE = {1: 0.20, 2: 0.20, 3: 1.0 / 7.0, 4: 1.0 / 7.0}
 
-# Inner approach surface (precision runways only): hw = half-width each side,
+# Inner approach surface (precision runways only): hw = half-width each side
+# (Table 4-1 "Width" is the full 90/120/120 m; halves are 45/45/60/60),
 # dist = distance of inner edge before the threshold.
 INNER_APPROACH = {
-    1: dict(hw=90.0, dist=60.0, length=900.0, slope=0.025),
-    2: dict(hw=90.0, dist=60.0, length=900.0, slope=0.025),
-    3: dict(hw=120.0, dist=60.0, length=900.0, slope=0.02),
-    4: dict(hw=120.0, dist=60.0, length=900.0, slope=0.02),
+    1: dict(hw=45.0, dist=60.0, length=900.0, slope=0.025),
+    2: dict(hw=45.0, dist=60.0, length=900.0, slope=0.025),
+    3: dict(hw=60.0, dist=60.0, length=900.0, slope=0.02),
+    4: dict(hw=60.0, dist=60.0, length=900.0, slope=0.02),
 }
 
 # Inner transitional surface slope (precision runways only): 40% code 1/2,
 # 33.3% code 3/4.
 INNER_TRANSITIONAL_SLOPE = {1: 0.40, 2: 0.40, 3: 1.0 / 3.0, 4: 1.0 / 3.0}
 
-# Balked landing surface (precision runways only). dist = distance of the
-# inner edge after the threshold (end of strip for code 1/2).
+# Balked landing surface (precision runways only). hw = half-width each side
+# (Table 4-1 inner edge is the full 90/120/120 m; halves are 45/45/60/60).
+# dist = distance of the inner edge after the threshold (end of strip for
+# code 1/2).
 BALKED_LANDING = {
-    1: dict(hw=90.0, dist=0.0, divergence=0.10, slope=0.04, strip_end=True),
-    2: dict(hw=90.0, dist=0.0, divergence=0.10, slope=0.04, strip_end=True),
-    3: dict(hw=120.0, dist=1800.0, divergence=0.10, slope=1.0 / 30.0, strip_end=False),
-    4: dict(hw=120.0, dist=1800.0, divergence=0.10, slope=1.0 / 30.0, strip_end=False),
+    1: dict(hw=45.0, dist=0.0, divergence=0.10, slope=0.04, strip_end=True),
+    2: dict(hw=45.0, dist=0.0, divergence=0.10, slope=0.04, strip_end=True),
+    3: dict(hw=60.0, dist=1800.0, divergence=0.10, slope=1.0 / 30.0, strip_end=False),
+    4: dict(hw=60.0, dist=1800.0, divergence=0.10, slope=1.0 / 30.0, strip_end=False),
 }
 
 # Take-off climb surface (Table 4-2). hw = half of "length of inner edge",
@@ -184,9 +194,11 @@ TAKE_OFF_CLIMB = {
 }
 
 # Outer horizontal surface - not an Annex 14 table item; per KCAA AC
-# AGA005B 4.2.1.3 tall structures are significant when higher than 30 m AGL
-# and higher than 150 m above aerodrome elevation within 15 000 m of the
-# aerodrome centre (runway code number 3 or 4).
+# AGA005C 4.2.1.3 tall structures are of possible significance when higher
+# than 30 m AGL and higher than 150 m above aerodrome elevation within
+# 15 000 m of the aerodrome centre where the runway code number is 3 or 4.
+# (This is a significance/advance-notice criterion rather than a hard
+# restriction; see utils.py "significant_outer_horizontal".)
 OUTER_HORIZONTAL_HEIGHT = 150.0
 OUTER_HORIZONTAL_RADIUS = 15000.0
 OUTER_HORIZONTAL_CODES = (3, 4)
