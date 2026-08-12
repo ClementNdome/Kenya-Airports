@@ -11,15 +11,17 @@ import rasterio
 from django.conf import settings
 from django.core.cache import cache
 from django.core.mail import send_mail
-from django.contrib.gis.geos import Point
-from django.contrib.gis.db.models.functions import Distance
+from django.contrib.gis.geos import Point, Polygon
 from django.template.loader import render_to_string
 from django.urls import reverse
 from functools import lru_cache
 from geopy.distance import geodesic
 from xhtml2pdf import pisa
 
+import pyproj
+
 from .models import Aerodrome, AerodromeBuffer, AerodromeRunway
+from . import projection
 from .ols_surfaces import (
     AirportOLS,
     RunwayOLS,
@@ -28,6 +30,8 @@ from .ols_surfaces import (
     IHS_RADIUS,
     CONICAL_HEIGHT,
     CONICAL_SLOPE,
+    OUTER_HORIZONTAL_HEIGHT,
+    OUTER_HORIZONTAL_CODES,
 )
 # from dotenv import load_dotenv
 import os
@@ -35,11 +39,24 @@ from decouple import config
 # load_dotenv()
 logger = logging.getLogger(__name__)
 
-# Regulatory zone per KCAA AC AGA005B (15 km) and lighting threshold
-# (30 m AGL) - the outer-horizontal significance criteria are applied
-# per runway code in ols_surfaces.OLS.
-KCAA_ZONE = 15000     # 15km regulatory zone
-LIGHTING_THRESHOLD = 30  # Lighting required for structures >30m within 15km
+# Regulatory zone per KCAA AC AGA005C 4.2.1.3: the outer-horizontal
+# significance criterion (30 m AGL AND >150 m above aerodrome elevation
+# within a 15 000 m radius) applies where the runway code number is 3 or 4.
+KCAA_ZONE = 15000     # 15 km significance radius (codes 3/4 only)
+LIGHTING_THRESHOLD = 30  # Structure significance height (m AGL)
+
+
+def significant_outer_horizontal(surfaces, building_top_amsl, airport_elev):
+    """True when the controlling surface is the outer horizontal alone and
+    the building exceeds it.
+
+    Per AC AGA005C 4.2.1.3 a structure above the outer horizontal plane
+    (beyond the conical surface, inside 15 km, codes 3/4) is of "possible
+    significance" - an advance-notice/lighting matter - not a hard OLS
+    restriction. The caller downgrades the verdict from hazard to caution.
+    """
+    return (set(surfaces or []) == {'outer_horizontal'}
+            and building_top_amsl > airport_elev + OUTER_HORIZONTAL_HEIGHT)
 
 def initial_bearing_rad(lat1, lon1, lat2, lon2):
     """Initial bearing in radians (clockwise from north) between two points."""
@@ -322,14 +339,12 @@ class ComplianceCalculator:
             coords2 = (point2.y, point2.x)
             return geodesic(coords1, coords2).meters
         else:
-            # Faster but less accurate - Web Mercator projection
-            # Suitable for rough calculations or when performance is critical
-            point1_3857 = point1.transform(3857, clone=True)
-            point2_3857 = point2.transform(3857, clone=True)
-            return point1_3857.distance(point2_3857)
+            # Faster, planar - measured in the local UTM zone (true metric,
+            # unlike the previous Web Mercator approximation).
+            return projection.distance_m(point1, point2)
 
     # =========================================================
-    # RUNWAY-BASED OLS (Annex 14 Table 4-1/4-2, KCAA AC AGA005B)
+    # RUNWAY-BASED OLS (Annex 14 Table 4-1/4-2, KCAA AC AGA005C)
     # - full surface set via ols_surfaces.RunwayOLS/AirportOLS.
     # =========================================================
 
@@ -572,6 +587,12 @@ class ComplianceCalculator:
                 else:
                     surfaces_checked = []
 
+            # AC AGA005C 4.2.1.3 applies the outer-horizontal significance
+            # rule only where the runway code number is 3 or 4.
+            has_code_3_4 = any(code in OUTER_HORIZONTAL_CODES
+                               for _cat, code in ols._arp_configs())
+            within_zone = has_code_3_4 and distance_km <= (KCAA_ZONE / 1000)
+
             # Determine hazard status and restrictions
             is_hazard = False
             max_allowed = None
@@ -586,10 +607,19 @@ class ComplianceCalculator:
             else:
                 max_allowed = None  # No OLS restriction beyond conical surface
 
+            # AC AGA005C 4.2.1.3: beyond the conical surface the tall-structure
+            # test is one of "possible significance" (advance notice, lighting),
+            # not a hard restriction - downgrade a purely outer-horizontal
+            # penetration from RED hazard to the caution/lighting path below.
+            significant_outer = significant_outer_horizontal(
+                surfaces_checked, building_top_amsl, airport_elev)
+            if is_hazard and significant_outer:
+                is_hazard = False
+
             # Determine lighting requirements
-            # AC AGA005B 4.2.1.3: objects higher than 30m AGL and higher than
-            # 150m above aerodrome elevation within 15km are significant and
-            # require lighting/marking (AC AGA032A).
+            # AC AGA005C 4.2.1.3: objects higher than 30m AGL and higher than
+            # 150m above aerodrome elevation within 15km (codes 3/4) are
+            # significant and require lighting/marking (AC AGA032A).
             requires_lighting = False
             lighting_reason = None
             light_levels = 0
@@ -597,11 +627,13 @@ class ComplianceCalculator:
             if is_hazard:
                 requires_lighting = True
                 lighting_reason = "Obstacle penetrates an obstacle limitation surface - lighting and marking required (AC AGA032A)"
-            elif (distance_km <= (KCAA_ZONE / 1000)
+            elif (within_zone
                     and prop_height_agl > LIGHTING_THRESHOLD
-                    and building_top_amsl > airport_elev + 150.0):
+                    and building_top_amsl > airport_elev + OUTER_HORIZONTAL_HEIGHT):
                 requires_lighting = True
-                lighting_reason = f"Structure {prop_height_agl}m AGL higher than {LIGHTING_THRESHOLD}m and 150m above aerodrome elevation within 15km (AC AGA005B)"
+                lighting_reason = (f"Structure {prop_height_agl}m AGL higher than {LIGHTING_THRESHOLD}m "
+                                   f"and 150m above aerodrome elevation within 15km (AC AGA005C 4.2.1.3); "
+                                   f"lighting required (AC AGA032A)")
             if requires_lighting:
                 # AC AGA032A: obstacle light levels spaced every 45m of height
                 light_levels = max(1, math.ceil(prop_height_agl / 45.0))
@@ -610,9 +642,13 @@ class ComplianceCalculator:
             if is_hazard:
                 status = "RED"
                 status_message = "HAZARD - Structure exceeds obstacle limitation surface"
-            elif distance_km <= (KCAA_ZONE / 1000):
+            elif within_zone:
                 status = "YELLOW"
-                status_message = "CAUTION - Within 15km regulatory zone"
+                if significant_outer:
+                    status_message = ("CAUTION - Significant structure above the outer horizontal "
+                                      "surface - lighting and marking required")
+                else:
+                    status_message = "CAUTION - Within 15km regulatory zone"
             else:
                 status = "GREEN"
                 status_message = "CLEAR - Outside all restriction zones"
@@ -634,7 +670,7 @@ class ComplianceCalculator:
                 "airport_elevation": round(airport_elev, 1),
                 "ols_ceiling_amsl": round(ols_ceiling, 1) if ols_ceiling is not None else None,
                 "surfaces_checked": surfaces_checked,
-                "within_15km_zone": distance_km <= (KCAA_ZONE / 1000),
+                "within_15km_zone": within_zone,
                 "within_conical_zone": distance_m <= conical_end_max,
                 "within_ihs_zone": distance_m <= ihs_radius_max
             }
@@ -836,25 +872,34 @@ class ComplianceCalculator:
     def get_airports_in_radius(self, prop_point, radius_km=15):
         """
         Get all airports within a given radius of a point
-        
+
         Args:
             prop_point: GEOS Point (SRID 4326)
             radius_km: Radius in kilometers
-        
+
         Returns:
-            QuerySet of Aerodrome objects
+            List of Aerodrome objects ordered by exact WGS84 geodesic
+            distance. A degree-bbox prefilter keeps the DB query index-fast;
+            the exact filter runs in Python on the (small) candidate set, so
+            no planar-degree distance lookup is involved.
         """
         if not prop_point:
-            return Aerodrome.objects.none()
-        
-        # Use spatial distance lookup (Django >= 2.0 API)
-        from django.contrib.gis.measure import D
-        from django.contrib.gis.db.models.functions import Distance
-        return Aerodrome.objects.filter(
-            geom__distance_lte=(prop_point, D(km=radius_km))
-        ).annotate(
-            _dist=Distance('geom', prop_point)
-        ).order_by('_dist')
+            return []
+        radius_m = float(radius_km) * 1000.0
+        lat, lon = float(prop_point.y), float(prop_point.x)
+        dlat = radius_m / 111320.0
+        dlon = radius_m / (111320.0 * max(0.2, math.cos(math.radians(lat))))
+        bbox = Polygon.from_bbox((lon - dlon, lat - dlat, lon + dlon, lat + dlat))
+        bbox.srid = 4326
+
+        geod = pyproj.Geod(ellps='WGS84')
+        nearby = []
+        for ad in Aerodrome.objects.filter(geom__within=bbox).only('id', 'icao_code'):
+            _, _, dist = geod.inv(lon, lat, float(ad.geom.x), float(ad.geom.y))
+            if abs(dist) <= radius_m:
+                nearby.append((abs(dist), ad))
+        nearby.sort(key=lambda t: t[0])
+        return [ad for _, ad in nearby]
 class ApplicationWorkflow:
     TRANSITIONS = {
         'draft': ['submitted'],
