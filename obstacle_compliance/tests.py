@@ -1,7 +1,9 @@
 import math
 
+from django.contrib.gis.geos import Point
 from django.test import SimpleTestCase
 
+from . import projection
 from .ols_surfaces import AirportOLS, RunwayOLS, reference_code
 
 # Synthetic code-4 precision runway, 3400 m, aligned due east at the equator:
@@ -81,13 +83,27 @@ class RunwayOLSTests(SimpleTestCase):
         self.assertAlmostEqual(approach_elevation(spec, 100.0, 15000), 250.0, places=1)
 
     def test_approach_lateral_limit(self):
-        # half-width at 1060 m = 280 + 0.15 x 1060 = 439 m; 800 m is outside,
+        # half-width at 1060 m = 140 + 0.15 x 1060 = 299 m; 800 m is outside,
         # the transitional-alongside-approach rises 1:7 from that edge
-        self.assertAlmostEqual(self.min_ceiling(1000, 800), 121.2 + (800 - 439) / 7.0, delta=1.0)
+        self.assertAlmostEqual(self.min_ceiling(1000, 800), 121.2 + (800 - 299) / 7.0, delta=1.0)
         self.assertIn('transitional_06', self.names_at(1000, 800))
 
+    def test_approach_inner_edge_half_width(self):
+        # Table 4-1 inner edge 280 m is the FULL length; the half-width used
+        # by the engine is 140 m each side of the centre line.
+        # At d=0, x = 60 m: half-width = 140 + 0.15 x 60 = 149 m.
+        self.assertIn('approach_06', self.names_at(0, 100))
+        self.assertNotIn('approach_06', self.names_at(0, 200))
+        self.assertIn('transitional_06', self.names_at(0, 200))
+
+    def test_inner_approach_half_width(self):
+        # Table 4-1 inner approach width is the full 120 m; the engine uses
+        # half-widths of 60 m each side.
+        self.assertIn('inner_approach_06', self.names_at(100, 50))
+        self.assertNotIn('inner_approach_06', self.names_at(100, 70))
+
     def test_inner_approach_only_on_centreline(self):
-        # inner approach half-width is 120 m; p=130 m is inside the approach
+        # inner approach half-width is 60 m; p=130 m is inside the approach
         # but outside the inner approach
         names = self.names_at(100, 130)
         self.assertIn('approach_06', names)
@@ -118,6 +134,13 @@ class RunwayOLSTests(SimpleTestCase):
     def test_balked_landing_terminates_at_inner_horizontal(self):
         # x > 45 / (1/30) = 1350 m -> the balked landing surface has ended
         self.assertNotIn('balked_landing_06', self.names_at(3400, 0))
+
+    def test_balked_landing_inner_edge_half_width(self):
+        # Table 4-1 balked landing inner edge is the full 120 m; the engine
+        # uses a 60 m half-width. At x = 50 m past the inner edge the
+        # half-width = 60 + 0.10 x 50 = 65 m.
+        self.assertIn('balked_landing_06', self.names_at(1850, 50))
+        self.assertNotIn('balked_landing_06', self.names_at(1850, 70))
 
     def test_no_surface_far_away(self):
         self.assertEqual(self.ceilings_at(20000, 0), [])
@@ -239,3 +262,76 @@ class SurfaceSliceTests(SimpleTestCase):
         for f in fc['features']:
             ring = f['geometry']['coordinates'][0]
             self.assertEqual(len(f['properties']['heights']), len(ring))
+
+
+class NonInstrumentCode1Tests(SimpleTestCase):
+    """Code-1 non-instrument strip: approach inner edge is the full 60 m
+    (30 m half-width) - pins the Table 4-1 half-width convention."""
+
+    def setUp(self):
+        rw1 = dict(RW4)
+        rw1.update({
+            'length_m': 900.0,
+            'category': 'non_instrument',
+            'code': 1,
+            'elev2_m': 100.0,
+            't2': (0.0, 36.0 + 900.0 / M_PER_DEG),
+        })
+        self.rw = RunwayOLS(rw1)
+
+    def test_approach_inner_edge_half_width(self):
+        # x = 100 + 30 (dist from threshold, code 1) = 130 m; half-width =
+        # 30 + 0.10 x 130 = 43 m -> p=25 inside, p=50 outside (transitional
+        # alongside the approach binds beyond the edge)
+        self.assertIn('approach_06', [n for _, n in self.rw.ceilings_at(*pt(100, 25))])
+        names = [n for _, n in self.rw.ceilings_at(*pt(100, 50))]
+        self.assertNotIn('approach_06', names)
+        self.assertIn('transitional_06', names)
+
+
+class OuterHorizontalSignificanceTests(SimpleTestCase):
+    """AC AGA005C 4.2.1.3: an outer-horizontal penetration beyond the conical
+    surface is one of 'possible significance', not a hard OLS hazard."""
+
+    def test_significance_classification(self):
+        from .utils import significant_outer_horizontal
+        self.assertTrue(significant_outer_horizontal(['outer_horizontal'], 300.0, 100.0))
+        self.assertFalse(significant_outer_horizontal(['outer_horizontal'], 249.0, 100.0))
+        self.assertFalse(significant_outer_horizontal(['outer_horizontal'], 250.0, 100.0))
+        self.assertFalse(significant_outer_horizontal(['inner_horizontal', 'outer_horizontal'], 300.0, 100.0))
+        self.assertFalse(significant_outer_horizontal([], 500.0, 100.0))
+
+
+class ProjectionTests(SimpleTestCase):
+    """UTM zone selection + true-metric buffering (no DB required)."""
+
+    def test_utm_zone_selection_kenya(self):
+        # Nairobi (south, zone 36): EPSG 32736
+        self.assertEqual(projection.utm_epsg(36.82, -1.32), 32736)
+        # Kisumu (south, zone 36): EPSG 32736
+        self.assertEqual(projection.utm_epsg(34.75, -0.10), 32736)
+        # Mombasa (south, zone 37): EPSG 32737
+        self.assertEqual(projection.utm_epsg(39.67, -4.04), 32737)
+        # Moyale (north, zone 37): EPSG 32637
+        self.assertEqual(projection.utm_epsg(39.10, 3.50), 32637)
+        # Lodwar (north, zone 36): EPSG 32636
+        self.assertEqual(projection.utm_epsg(35.60, 3.12), 32636)
+
+    def test_buffer_m_is_true_metric(self):
+        p = Point(36.82, -1.32, srid=4326)  # HKJK
+        buf = projection.buffer_m(p, 1000.0)
+        self.assertIsNotNone(buf)
+        area = projection.area_m2(buf)
+        self.assertAlmostEqual(area, math.pi * 1_000_000, delta=area * 0.01)
+        # Extents in the local UTM zone must be ~2 km both ways.
+        u = projection.to_utm(buf.clone())
+        xmin, ymin, xmax, ymax = u.extent
+        self.assertAlmostEqual(xmax - xmin, 2000.0, delta=25.0)
+        self.assertAlmostEqual(ymax - ymin, 2000.0, delta=25.0)
+
+    def test_geodesic_distance(self):
+        # JKIA (36.9278, -1.3192) -> Wilson (36.8150, -1.3186): ~12.5 km.
+        d = projection.distance_m(Point(36.9278, -1.3192, srid=4326),
+                                  Point(36.8150, -1.3186, srid=4326))
+        self.assertGreater(d, 12_000)
+        self.assertLess(d, 14_000)

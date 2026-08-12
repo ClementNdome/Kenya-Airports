@@ -3,7 +3,7 @@ import PIL
 if not hasattr(PIL, "__version__"): PIL.__version__ = "10.0.0"
 import os
 from pypdf import PdfReader
-r = PdfReader(r"E:\DEVELOPMENT_\DJANGOS\new-refined\Kenya-Airports\docs\CAA-AC-AGA005B CONTROL OF OBSTACLES.pdf")
+r = PdfReader(r"E:\DEVELOPMENT_\DJANGOS\new-refined\Kenya-Airports\docs\CAA-AC-AGA005C CONTROL OF OBSTACLES.pdf")
 for i, p in enumerate(r.pages):
     print(f"===== PAGE {i+1} =====")
     print(p.extract_text() or "")
