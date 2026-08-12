@@ -459,8 +459,18 @@
         </div>
     </div>
     
-    <!-- Main Controls (Buffer Radius) -->
+    <!-- Main Controls (Buffer builder: type + radius) -->
     <div class="map-controls">
+        <div class="controls-row">
+            <div class="control-group">
+                <button class="control-btn active" data-buffer-type="runway" title="Buffer around the runway centreline(s) - stadium/capsule shape">
+                    <i class="fas fa-route"></i> Runway
+                </button>
+                <button class="control-btn" data-buffer-type="arp" title="Buffer around the aerodrome reference point - circle shape">
+                    <i class="fas fa-dot-circle"></i> Point
+                </button>
+            </div>
+        </div>
         <div class="controls-row">
             <div class="control-group">
                 <button class="control-btn" data-radius="3">
@@ -469,29 +479,25 @@
                 <button class="control-btn" data-radius="5">
                     <i class="fas fa-circle" style="color: #796f5c;"></i> 5km
                 </button>
-                <button class="control-btn" data-radius="10">
+                <button class="control-btn active" data-radius="10">
                     <i class="fas fa-circle" style="color: #2196F3;"></i> 10km
                 </button>
-                <button class="control-btn active" data-radius="15">
-                    <i class="fas fa-circle" style="color: #4CAF50;"></i> 15km
-                </button>
             </div>
         </div>
-        <!-- NEW: Custom radius input (same as dashboard) -->
-    <div class="controls-row">
-        <div class="control-group" style="width: 220px;">
-            <div class="input-group input-group-sm w-100">
-                <input type="number" id="customRadiusInput" 
-                       class="form-control" 
-                       placeholder="Custom (1-15)" 
-                       min="1" max="50" style="width: 80px;">
-                <span class="input-group-text">km</span>
-                <button class="btn btn-outline-primary btn-sm" type="button" id="applyCustomRadius">
-                    <i class="fas fa-check"></i>
-                </button>
+        <div class="controls-row">
+            <div class="control-group" style="width: 220px;">
+                <div class="input-group input-group-sm w-100">
+                    <input type="number" id="customRadiusInput" 
+                           class="form-control" 
+                           placeholder="Custom (1-50)" 
+                           min="1" max="50" style="width: 80px;">
+                    <span class="input-group-text">km</span>
+                    <button class="btn btn-outline-primary btn-sm" type="button" id="applyCustomRadius">
+                        <i class="fas fa-check"></i>
+                    </button>
+                </div>
             </div>
         </div>
-    </div>
         <div class="controls-row">
             <div class="control-group">
                 <button class="control-btn" id="toggleAirports">
@@ -628,7 +634,7 @@
         
         // Load initial data
         loadAirports();
-        loadBuffers(15);
+        loadBuffers(10, 'runway');
         loadRunways();
         {% if user.is_authenticated %}loadMyProperties();{% endif %}
         
@@ -678,10 +684,28 @@
         });
         
         // ============================================
-        // BUFFER RADIUS CONTROLS
+        // BUFFER BUILDER CONTROLS (type + radius)
         // ============================================
-        
-        let currentRadius = 15;   // ← NEW: track current radius
+
+        let currentRadius = 10;
+        let currentBufferType = 'runway';
+
+        document.querySelectorAll('[data-buffer-type]').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const type = this.dataset.bufferType;
+                if (currentBufferType === type) return;
+                currentBufferType = type;
+
+                document.querySelectorAll('[data-buffer-type]').forEach(b => {
+                    b.classList.remove('active');
+                });
+                this.classList.add('active');
+
+                if (document.getElementById('toggleBuffers').classList.contains('active')) {
+                    loadBuffers(currentRadius, currentBufferType);
+                }
+            });
+        });
 
         document.querySelectorAll('[data-radius]').forEach(btn => {
             btn.addEventListener('click', function() {
@@ -695,7 +719,7 @@
                 this.classList.add('active');
                 
                 if (document.getElementById('toggleBuffers').classList.contains('active')) {
-                    loadBuffers(radius);
+                    loadBuffers(currentRadius, currentBufferType);
                 }
             });
         });
@@ -714,7 +738,7 @@
             document.querySelectorAll('[data-radius]').forEach(b => b.classList.remove('active'));
             
             if (document.getElementById('toggleBuffers').classList.contains('active')) {
-                loadBuffers(currentRadius);
+                loadBuffers(currentRadius, currentBufferType);
             }
             
             // Optional: show feedback
@@ -746,8 +770,7 @@
             
             if (this.classList.contains('active')) {
                 map.addLayer(bufferLayer);
-                const activeRadius = document.querySelector('[data-radius].active').dataset.radius;
-                loadBuffers(parseInt(activeRadius));
+                loadBuffers(currentRadius, currentBufferType);
             } else {
                 map.removeLayer(bufferLayer);
             }
@@ -1090,8 +1113,9 @@
                 });
         }
         
-        function loadBuffers(radius) {
-            fetch(`/obstacle-compliance/api/buffers.geojson?radius=${radius}`)
+        function loadBuffers(radius, bufferType) {
+            const type = bufferType || currentBufferType || 'runway';
+            fetch(`/obstacle-compliance/api/buffers.geojson?radius=${radius}&type=${type}`)
                 .then(response => response.json())
                 .then(data => {
                     map.removeLayer(bufferLayer);
@@ -1105,7 +1129,7 @@
                                 opacity: 0.8,
                                 fillColor: feature.properties.fill,
                                 fillOpacity: 0.15,
-                                dashArray: feature.properties.buffer_type === 'runway_threshold' ? '7 4' : undefined
+                                dashArray: feature.properties.buffer_type === 'runway' ? '7 4' : undefined
                             };
                         },
                         onEachFeature: function(feature, layer) {
@@ -1116,7 +1140,7 @@
                                     <p class="small mb-1">
                                         <strong>ICAO:</strong> ${props.airport_icao}<br>
                                         <strong>Buffer:</strong> ${props.radius_km}km
-                                        ${props.buffer_type === 'runway_threshold' ? '<span class="badge bg-info ms-1">runway</span>' : ''}<br>
+                                        ${props.buffer_type === 'runway' ? '<span class="badge bg-info ms-1">runway</span>' : '<span class="badge bg-secondary ms-1">point</span>'}<br>
                                         ${props.area_km2 ? `<strong>Area:</strong> ${props.area_km2} km²` : ''}
                                     </p>
                                 </div>

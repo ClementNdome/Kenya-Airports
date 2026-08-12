@@ -42,11 +42,23 @@
                             </h5>
                         </div>
                         <div class="d-flex flex-wrap gap-2 w-100 w-xl-auto">
+                            <!-- Buffer type selector -->
+                            <div class="btn-group btn-group-sm" role="group" aria-label="Buffer type">
+                                <button type="button" class="btn btn-sm btn-outline-primary active" data-buffer-type="runway" title="Buffer around the runway centreline(s) - capsule shape">
+                                    <i class="fas fa-route me-1"></i>
+                                    <span class="d-none d-lg-inline">Runway</span>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" data-buffer-type="arp" title="Buffer around the aerodrome reference point - circle shape">
+                                    <i class="fas fa-dot-circle me-1"></i>
+                                    <span class="d-none d-lg-inline">Point</span>
+                                </button>
+                            </div>
+
                             <!-- Buffer radius selector - Responsive -->
                             <div class="d-flex flex-wrap gap-1" role="group" aria-label="Buffer radius">
+                                <button type="button" class="btn btn-sm btn-outline-primary" data-radius="3">3km</button>
                                 <button type="button" class="btn btn-sm btn-outline-primary" data-radius="5">5km</button>
-                                <button type="button" class="btn btn-sm btn-outline-primary" data-radius="10">10km</button>
-                                <button type="button" class="btn btn-sm btn-primary" data-radius="15" id="defaultRadiusBtn">15km</button>
+                                <button type="button" class="btn btn-sm btn-primary" data-radius="10" id="defaultRadiusBtn">10km</button>
                                 <div class="d-flex" style="min-width: 140px;">
                                     <input type="number" id="customRadiusInput" class="form-control form-control-sm" placeholder="Custom" min="1" max="50" style="width: 80px;">
                                     <span class="input-group-text bg-light px-2">km</span>
@@ -116,7 +128,7 @@
                         <div class="col-12 col-md-6 mb-2 mb-md-0">
                             <small class="text-muted d-block d-sm-inline">
                                 <i class="fas fa-info-circle me-1"></i>
-                                Showing <span id="airportCount">{{ total_airports }}</span> aerodromes, <span id="runwayCount">-</span> runways and <span id="bufferCount">{{ buffer_stats.15km }}</span> buffer zones
+                                Showing <span id="airportCount">{{ total_airports }}</span> aerodromes, <span id="runwayCount">-</span> runways and <span id="bufferCount">{{ buffer_stats.10km }}</span> buffer zones
                             </small>
                         </div>
                         <div class="col-12 col-md-6">
@@ -187,7 +199,7 @@
                                         {% endif %}
                                     </td>
                                     <td>
-                                        <a href="{% url 'obstacle_compliance:map_view' %}?airport={{ airport.icao_code }}&radius=15" 
+                                        <a href="{% url 'obstacle_compliance:map_view' %}?airport={{ airport.icao_code }}&radius=10&type=runway" 
                                            class="btn btn-sm btn-outline-info" title="View on Map">
                                             <i class="fas fa-map-marker-alt"></i>
                                         </a>
@@ -331,7 +343,8 @@
         var showRunways = true;
         var showOls = false;
         var showTerrain = false;
-        var currentRadius = 15;
+        var currentRadius = 10;
+        var currentBufferType = 'runway';
 
         // Add status indicators for layer toggles
         function updateLayerIndicators() {
@@ -403,7 +416,7 @@
 
             currentRadius = radius;
             if (showBuffers) {
-                loadBuffers(radius);
+                loadBuffers(radius, currentBufferType);
             }
         });
 
@@ -415,8 +428,26 @@
         
         // Load initial data
         loadAirports();
-        loadBuffers(15);
+        loadBuffers(10, 'runway');
         loadRunways();
+        
+        // Buffer type buttons
+        document.querySelectorAll('[data-buffer-type]').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const type = this.getAttribute('data-buffer-type');
+                if (currentBufferType === type) return;
+                currentBufferType = type;
+                
+                document.querySelectorAll('[data-buffer-type]').forEach(b => {
+                    b.classList.remove('active');
+                });
+                this.classList.add('active');
+                
+                if (showBuffers) {
+                    loadBuffers(currentRadius, currentBufferType);
+                }
+            });
+        });
         
         // Buffer radius buttons
         document.querySelectorAll('[data-radius]').forEach(btn => {
@@ -434,7 +465,7 @@
                 customInput.value = '';
                 
                 if (showBuffers) {
-                    loadBuffers(radius);
+                    loadBuffers(radius, currentBufferType);
                 }
             });
         });
@@ -486,7 +517,7 @@
                 if (!map.hasLayer(bufferLayer)) {
                     bufferLayer.addTo(map);
                 }
-                loadBuffers(currentRadius);
+                loadBuffers(currentRadius, currentBufferType);
             } else {
                 if (map.hasLayer(bufferLayer)) {
                     map.removeLayer(bufferLayer);
@@ -761,7 +792,7 @@
                                            style="padding: 2px 8px; font-size: 11px; text-decoration: none; color: white;">
                                             Details
                                         </a> {% endcomment %}
-                                        <a href="/obstacle-compliance/map/?airport=${props.icao}&radius=${currentRadius}" 
+                                        <a href="/obstacle-compliance/map/?airport=${props.icao}&radius=${currentRadius}&type=${currentBufferType}" 
                                            class="btn btn-sm btn-outline-secondary" 
                                            style="padding: 2px 8px; font-size: 11px; text-decoration: none;">
                                             Map
@@ -785,10 +816,11 @@
                 });
         }
         
-        function loadBuffers(radius) {
+        function loadBuffers(radius, bufferType) {
             if (!showBuffers) return;
+            const type = bufferType || currentBufferType || 'runway';
             
-            fetch(`/obstacle-compliance/api/buffers.geojson?radius=${radius}`)
+            fetch(`/obstacle-compliance/api/buffers.geojson?radius=${radius}&type=${type}`)
                 .then(response => response.json())
                 .then(data => {
                     if (map.hasLayer(bufferLayer)) {
