@@ -32,8 +32,9 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 
-from .models import Aerodrome, AerodromeBuffer, UserProfile, Property, ComplianceCheck, Notification, ComplianceApplication, BulkUploadJob
+from .models import Aerodrome, AerodromeBuffer, AerodromeRunway, DeclaredDistance, UserProfile, Property, ComplianceCheck, Notification, ComplianceApplication, BulkUploadJob
 from .utils import ComplianceCalculator, DEMService, ApplicationWorkflow
+from .ols_surfaces import RunwayOLS, reference_code
 from obstacle_compliance import models
 
 logger = logging.getLogger(__name__)
@@ -243,6 +244,7 @@ class PropertyComplianceView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['default_height'] = 30
+        context['mapbox_token'] = getattr(settings, 'MAPBOX_PUBLIC_ACCESS_TOKEN', '')
         context['map_config'] = {
             'center': [-1.2864, 36.8172],
             'zoom': 12,
@@ -887,7 +889,142 @@ class AirportGeoJSONView(View):
         elif 'airstrip' in airport_type or 'private' in airport_type:
             return '#ffc107'  # Yellow for small airstrips
         else:
-            return '#6c757d'  # Gray for unknown# ============================================
+            return '#6c757d'  # Gray for unknown
+
+# ============================================
+# RUNWAY AND OLS GEOJSON VIEWS
+# ============================================
+
+class RunwaysGeoJSONView(View):
+    """
+    Declared runway geometry as GeoJSON: centerline, strip rectangle and
+    threshold points per runway end, with declared distances in the popup.
+    """
+    @method_decorator(cache_page(60 * 30))
+    def get(self, request):
+        try:
+            icao = request.GET.get('icao')
+            qs = AerodromeRunway.objects.all()
+            if icao:
+                qs = qs.filter(icao_code=icao.upper())
+
+            features = []
+            declared = {
+                d.icao_code: d for d in DeclaredDistance.objects.all()
+            }
+            for rwy in qs:
+                try:
+                    g = calculator._runway_geometry(rwy)
+                    if not g:
+                        continue
+                    code = reference_code(rwy.length_declared_m or g['length_m'])
+                    category = rwy.approach_category or 'non_precision'
+                    rw_ols = RunwayOLS(dict(g, category=category, code=code))
+
+                    centerline = [[g['t1'][1], g['t1'][0]], [g['t2'][1], g['t2'][0]]]
+                    strip_ring = rw_ols.footprint('strip') or centerline
+
+                    dd = declared.get(rwy.icao_code)
+                    properties = {
+                        'id': rwy.id,
+                        'icao': rwy.icao_code,
+                        'pair': rwy.runway_pair,
+                        'designator1': g['designator1'],
+                        'designator2': g['designator2'],
+                        'length_m': round(g['length_m']),
+                        'length_declared_m': rwy.length_declared_m,
+                        'width_declared_m': rwy.width_declared_m,
+                        'strip_dimensions_m': rwy.strip_dimensions_m,
+                        'thr_elevation_1_m': g['elev1_m'],
+                        'thr_elevation_2_m': g['elev2_m'],
+                        'approach_category': category,
+                        'code': code,
+                        'ofz': rwy.ofz,
+                        'pcn_surface': rwy.strength_pcn_surface,
+                        'slope_pct': rwy.slope_pct,
+                        'declared_1': {
+                            'tora_m': dd.tora_m_1 if dd else None,
+                            'toda_m': dd.toda_m_1 if dd else None,
+                            'asda_m': dd.asda_m_1 if dd else None,
+                            'lda_m': dd.lda_m_1 if dd else None,
+                        },
+                        'declared_2': {
+                            'tora_m': dd.tora_m_2 if dd else None,
+                            'toda_m': dd.toda_m_2 if dd else None,
+                            'asda_m': dd.asda_m_2 if dd else None,
+                            'lda_m': dd.lda_m_2 if dd else None,
+                        },
+                    }
+                    features.append({
+                        'type': 'Feature',
+                        'geometry': {
+                            'type': 'LineString',
+                            'coordinates': centerline,
+                        },
+                        'properties': dict(properties, kind='centerline'),
+                    })
+                    features.append({
+                        'type': 'Feature',
+                        'geometry': {
+                            'type': 'Polygon',
+                            'coordinates': [strip_ring],
+                        },
+                        'properties': dict(properties, kind='strip'),
+                    })
+                    for (thr, label) in ((g['t1'], g['designator1']), (g['t2'], g['designator2'])):
+                        features.append({
+                            'type': 'Feature',
+                            'geometry': {
+                                'type': 'Point',
+                                'coordinates': [thr[1], thr[0]],
+                            },
+                            'properties': dict(properties, kind='threshold', designator=label),
+                        })
+                except Exception as e:
+                    logger.error(f"RunwaysGeoJSONView error on {rwy.icao_code}: {e}")
+                    continue
+
+            return JsonResponse({
+                'type': 'FeatureCollection',
+                'features': features,
+                'metadata': {'count': len(features), 'icao_filter': icao},
+            })
+        except Exception as e:
+            logger.error(f"RunwaysGeoJSONView error: {str(e)}", exc_info=True)
+            return JsonResponse({'type': 'FeatureCollection', 'features': []})
+
+
+class OLSGeoJSONView(View):
+    """
+    OLS surface footprints (Annex 14 Table 4-1/4-2 per runway code/category)
+    as GeoJSON polygons, optional single-airport filter.
+    """
+    @method_decorator(cache_page(60 * 15))
+    def get(self, request):
+        try:
+            icao = request.GET.get('icao')
+            if icao:
+                ad = Aerodrome.objects.filter(icao_code=icao.upper()).first()
+                if not ad:
+                    return JsonResponse({'type': 'FeatureCollection', 'features': []})
+                fc = calculator._airport_ols(ad).footprints()
+                return JsonResponse(fc)
+
+            fc = {'type': 'FeatureCollection', 'features': []}
+            for ad in Aerodrome.objects.all():
+                ols = calculator._airport_ols(ad)
+                if ols.runways:
+                    fc['features'].extend(ols.footprints()['features'])
+            return JsonResponse({
+                'type': 'FeatureCollection',
+                'features': fc['features'],
+                'metadata': {'count': len(fc['features'])},
+            })
+        except Exception as e:
+            logger.error(f"OLSGeoJSONView error: {str(e)}", exc_info=True)
+            return JsonResponse({'type': 'FeatureCollection', 'features': []})
+
+# ============================================
 # SEARCH AND AUTOCOMPLETE VIEWS
 # ============================================
 
