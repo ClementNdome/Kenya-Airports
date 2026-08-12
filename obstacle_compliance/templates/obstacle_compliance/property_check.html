@@ -304,11 +304,24 @@
         </div>
         
         <!-- Cross-Section Charts -->
-        <h6 class="fw-bold mt-4 mb-3">
-            <i class="fas fa-chart-line me-2 text-primary"></i>
-            OLS Cross-Section (terrain vs ceiling)
-        </h6>
+        <div class="d-flex justify-content-between align-items-center mt-4 mb-3">
+            <h6 class="fw-bold mb-0">
+                <i class="fas fa-chart-line me-2 text-primary"></i>
+                OLS Profile
+            </h6>
+            {% if mapbox_token %}
+            <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn btn-outline-primary active" id="view2dBtn">
+                    <i class="fas fa-chart-line me-1"></i>2D Profile
+                </button>
+                <button type="button" class="btn btn-outline-primary" id="view3dBtn">
+                    <i class="fas fa-cube me-1"></i>3D View
+                </button>
+            </div>
+            {% endif %}
+        </div>
         <div id="chartContainer"></div>
+        <div id="gl3d" class="rounded border" style="display: none; height: 520px; background: #0b1220;"></div>
         <div class="small text-muted mb-2">
             <i class="fas fa-info-circle me-1"></i>
             Solid line = OLS ceiling (Annex 14 surfaces where applicable), dashed line = terrain. The vertical gap is your headroom at that distance from the aerodrome reference point.
@@ -624,6 +637,9 @@
             .then(data => {
                 displayResults(data);
                 drawOverlays(data);
+                if (glMap && document.getElementById('gl3d').style.display !== 'none') {
+                    renderGLScene(data);
+                }
             })
             .catch(error => {
                 console.error('Compliance check error:', error);
@@ -726,6 +742,18 @@
         document.getElementById('downloadReport').addEventListener('click', downloadReport);
         document.getElementById('printResults').addEventListener('click', () => window.print());
         document.getElementById('shareResults').addEventListener('click', shareResults);
+
+        // 2D / 3D profile view toggle
+        const view2d = document.getElementById('view2dBtn');
+        const view3d = document.getElementById('view3dBtn');
+        if (view2d && view3d) {
+            view2d.addEventListener('click', () => switchProfileView('2d'));
+            view3d.addEventListener('click', () => switchProfileView('3d'));
+            if (document.getElementById('gl3d').style.display !== 'none') {
+                view2d.classList.remove('active');
+                view3d.classList.add('active');
+            }
+        }
         
         // Show and bind save button
         const saveBtn = document.getElementById('saveProperty');
@@ -917,6 +945,186 @@
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-file-pdf me-2"></i>Download Full Report';
         });
+    }
+
+    // ============================================
+    // MAPBOX GL 3D OLS VIEW
+    // ============================================
+    const MAPBOX_TOKEN = "{{ mapbox_token|default:'' }}";
+    let glMap = null;
+    let glSceneData = null;
+
+    function loadMapboxGL(cb) {
+        if (window.mapboxgl) { cb(); return; }
+        if (!document.getElementById('mapbox-gl-js')) {
+            const css = document.createElement('link');
+            css.id = 'mapbox-gl-css';
+            css.rel = 'stylesheet';
+            css.href = 'https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.css';
+            document.head.appendChild(css);
+            const s = document.createElement('script');
+            s.id = 'mapbox-gl-js';
+            s.src = 'https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.js';
+            s.onload = cb;
+            document.head.appendChild(s);
+        } else {
+            cb();
+        }
+    }
+
+    function switchProfileView(mode) {
+        const chart = document.getElementById('chartContainer');
+        const gl3d = document.getElementById('gl3d');
+        const b2 = document.getElementById('view2dBtn');
+        const b3 = document.getElementById('view3dBtn');
+        if (mode === '3d') {
+            chart.style.display = 'none';
+            gl3d.style.display = 'block';
+            b2.classList.remove('active');
+            b3.classList.add('active');
+            initGLScene();
+        } else {
+            gl3d.style.display = 'none';
+            chart.style.display = 'block';
+            b3.classList.remove('active');
+            b2.classList.add('active');
+            if (charts.length) {
+                try { charts.forEach(c => c.resize()); } catch (e) {}
+            }
+        }
+    }
+
+    function initGLScene() {
+        if (!MAPBOX_TOKEN) {
+            const gl3d = document.getElementById('gl3d');
+            gl3d.style.display = 'block';
+            gl3d.innerHTML = '<div class="text-center text-secondary p-5"><i class="fas fa-exclamation-triangle me-2"></i>3D view requires a Mapbox public access token (MAPBOX_PUBLIC_ACCESS_TOKEN).</div>';
+            return;
+        }
+        loadMapboxGL(function() {
+            if (glMap) {
+                glMap.resize();
+                if (glSceneData) renderGLScene(glSceneData);
+                return;
+            }
+            const lat = parseFloat(document.getElementById('latitude').value) || -1.2864;
+            const lon = parseFloat(document.getElementById('longitude').value) || 36.8172;
+            mapboxgl.accessToken = MAPBOX_TOKEN;
+            glMap = new mapboxgl.Map({
+                container: 'gl3d',
+                style: 'mapbox://styles/mapbox/satellite-v9',
+                center: [lon, lat],
+                zoom: 12.5,
+                pitch: 60,
+                bearing: -25,
+                antialias: true,
+                maxPitch: 85,
+                attributionControl: true
+            });
+            glMap.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }));
+            glMap.on('load', function() {
+                glMap.addSource('mapbox-dem', {
+                    type: 'raster-dem',
+                    url: 'mapbox://mapbox.terrain-rgb-v2',
+                    tileSize: 512,
+                    maxzoom: 14
+                });
+                glMap.setTerrain({ source: 'mapbox-dem', exaggeration: 1.3 });
+                glMap.addLayer({ id: 'sky', type: 'sky',
+                    paint: { 'sky-type': 'atmosphere', 'sky-atmosphere-sun-intensity': 0.6 } });
+                if (glSceneData) renderGLScene(glSceneData);
+            });
+        });
+    }
+
+    const SURFACE_HEX = {
+        approach: '#ef4444', take_off: '#f97316', inner_approach: '#a855f7',
+        balked_landing: '#ec4899', inner_horizontal: '#3b82f6',
+        conical: '#10b981', outer_horizontal: '#84cc16', strip: '#f59e0b',
+        transitional: '#14b8a6'
+    };
+
+    function renderGLScene(data) {
+        glSceneData = data;
+        if (!glMap || !glMap.isStyleLoaded()) return;
+
+        // 1) OLS surface volumes of the primary airport
+        const primaryIcao = data.primary_airport && data.primary_airport.icao_code;
+        if (primaryIcao && !glMap.getSource('ols')) {
+            fetch(`/obstacle-compliance/api/ols.geojson?icao=${primaryIcao}`)
+                .then(r => r.json())
+                .then(fc => {
+                    if (!glMap.getSource('ols')) {
+                        glMap.addSource('ols', { type: 'geojson', data: fc });
+                        glMap.addLayer({
+                            id: 'ols-extrusion',
+                            type: 'fill-extrusion',
+                            source: 'ols',
+                            paint: {
+                                'fill-extrusion-height': ['get', 'height_m'],
+                                'fill-extrusion-base': 0,
+                                'fill-extrusion-color': ['match', ['get', 'surface'],
+                                    'approach', '#ef4444', 'take_off', '#f97316',
+                                    'inner_approach', '#a855f7', 'balked_landing', '#ec4899',
+                                    'inner_horizontal', '#3b82f6', 'conical', '#10b981',
+                                    'outer_horizontal', '#84cc16', 'strip', '#f59e0b',
+                                    '#14b8a6'],
+                                'fill-extrusion-opacity': 0.28
+                            }
+                        });
+                    }
+                })
+                .catch(() => {});
+        }
+
+        // 2) Property building + OLS ceiling plane at the checked point
+        const pr = data.primary_result || {};
+        const lat = parseFloat(document.getElementById('latitude').value);
+        const lon = parseFloat(document.getElementById('longitude').value);
+        const height = parseFloat(document.getElementById('height').value) || 0;
+        const hw = 0.00009; // ~10 m half-width
+        const baseBox = {
+            'type': 'Polygon',
+            'coordinates': [[
+                [lon - hw, lat - hw], [lon + hw, lat - hw],
+                [lon + hw, lat + hw], [lon - hw, lat + hw], [lon - hw, lat - hw]
+            ]]
+        };
+        const geojson = {
+            'type': 'FeatureCollection',
+            'features': [
+                { 'type': 'Feature', 'properties': { 'kind': 'building', 'h': Math.max(height, 0.5) },
+                  'geometry': baseBox },
+                { 'type': 'Feature', 'properties': { 'kind': 'ceiling', 'h': pr.max_allowed_agl != null ? Math.max(pr.max_allowed_agl, 0.5) : 0 },
+                  'geometry': baseBox }
+            ]
+        };
+        if (glMap.getSource('props')) glMap.getSource('props').setData(geojson);
+        else {
+            glMap.addSource('props', { type: 'geojson', data: geojson });
+            glMap.addLayer({
+                id: 'building-extrusion', type: 'fill-extrusion', source: 'props',
+                filter: ['==', ['get', 'kind'], 'building'],
+                paint: { 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-base': 0,
+                         'fill-extrusion-color': '#dc3545', 'fill-extrusion-opacity': 0.85 }
+            });
+            glMap.addLayer({
+                id: 'ceiling-extrusion', type: 'fill-extrusion', source: 'props',
+                filter: ['==', ['get', 'kind'], 'ceiling'],
+                paint: { 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-base': 0,
+                         'fill-extrusion-color': '#3b82f6', 'fill-extrusion-opacity': 0.25 }
+            });
+            glMap.addLayer({
+                id: 'property-marker', type: 'circle', source: 'props',
+                filter: ['==', ['get', 'kind'], 'building'],
+                paint: { 'circle-radius': 6, 'circle-color': '#ffffff',
+                         'circle-stroke-color': '#dc3545', 'circle-stroke-width': 2,
+                         'circle-translate': [0, 0] }
+            });
+        }
+
+        // 3) Move the camera to the property
+        glMap.flyTo({ center: [lon, lat], zoom: 13.5, pitch: 60, bearing: -25, duration: 1600 });
     }
 </script>
 {% endblock %}

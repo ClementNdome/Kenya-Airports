@@ -68,6 +68,16 @@
                                     <span class="d-none d-sm-inline">Buffers</span>
                                     <span class="badge bg-info ms-1 status-indicator" style="display: none;">✓</span>
                                 </button>
+                                <button type="button" class="btn btn-outline-warning active" id="toggleRunways">
+                                    <i class="fas fa-route me-1"></i>
+                                    <span class="d-none d-sm-inline">Runways</span>
+                                    <span class="badge bg-warning ms-1 status-indicator" style="display: none;">✓</span>
+                                </button>
+                                <button type="button" class="btn btn-outline-danger" id="toggleOls">
+                                    <i class="fas fa-chart-area me-1"></i>
+                                    <span class="d-none d-sm-inline">OLS</span>
+                                    <span class="badge bg-danger ms-1 status-indicator" style="display: none;">✓</span>
+                                </button>
                             </div>
 
                             <!-- Basemap switcher dropdown -->
@@ -101,7 +111,7 @@
                         <div class="col-12 col-md-6 mb-2 mb-md-0">
                             <small class="text-muted d-block d-sm-inline">
                                 <i class="fas fa-info-circle me-1"></i>
-                                Showing <span id="airportCount">{{ total_airports }}</span> aerodromes and <span id="bufferCount">{{ buffer_stats.15km }}</span> buffer zones
+                                Showing <span id="airportCount">{{ total_airports }}</span> aerodromes, <span id="runwayCount">-</span> runways and <span id="bufferCount">{{ buffer_stats.15km }}</span> buffer zones
                             </small>
                         </div>
                         <div class="col-12 col-md-6">
@@ -306,16 +316,22 @@
         // Layer groups
         var airportLayer = L.layerGroup().addTo(map);
         var bufferLayer = L.layerGroup().addTo(map);
+        var runwayLayer = L.layerGroup().addTo(map);
+        var olsLayer = L.layerGroup();
         
         // Track active layers
         var showAirports = true;
         var showBuffers = true;
+        var showRunways = true;
+        var showOls = false;
         var currentRadius = 15;
 
         // Add status indicators for layer toggles
         function updateLayerIndicators() {
             const airportBtn = document.getElementById('toggleAirports');
             const bufferBtn = document.getElementById('toggleBuffers');
+            const runwayBtn = document.getElementById('toggleRunways');
+            const olsBtn = document.getElementById('toggleOls');
             
             if (showAirports) {
                 airportBtn.classList.add('active');
@@ -331,6 +347,22 @@
             } else {
                 bufferBtn.classList.remove('active');
                 bufferBtn.querySelector('.status-indicator').style.display = 'none';
+            }
+
+            if (showRunways) {
+                runwayBtn.classList.add('active');
+                runwayBtn.querySelector('.status-indicator').style.display = 'inline-block';
+            } else {
+                runwayBtn.classList.remove('active');
+                runwayBtn.querySelector('.status-indicator').style.display = 'none';
+            }
+
+            if (showOls) {
+                olsBtn.classList.add('active');
+                olsBtn.querySelector('.status-indicator').style.display = 'inline-block';
+            } else {
+                olsBtn.classList.remove('active');
+                olsBtn.querySelector('.status-indicator').style.display = 'none';
             }
         }
 
@@ -366,6 +398,7 @@
         // Load initial data
         loadAirports();
         loadBuffers(15);
+        loadRunways();
         
         // Buffer radius buttons
         document.querySelectorAll('[data-radius]').forEach(btn => {
@@ -442,6 +475,176 @@
                 }
             }
         });
+
+        // Toggle runways
+        document.getElementById('toggleRunways').addEventListener('click', function() {
+            showRunways = !showRunways;
+            updateLayerIndicators();
+
+            if (showRunways) {
+                if (!map.hasLayer(runwayLayer)) {
+                    runwayLayer.addTo(map);
+                }
+                loadRunways();
+            } else {
+                if (map.hasLayer(runwayLayer)) {
+                    map.removeLayer(runwayLayer);
+                }
+            }
+        });
+
+        // Toggle OLS surfaces
+        document.getElementById('toggleOls').addEventListener('click', function() {
+            showOls = !showOls;
+            updateLayerIndicators();
+
+            if (showOls) {
+                if (!map.hasLayer(olsLayer)) {
+                    olsLayer.addTo(map);
+                }
+                loadOls();
+            } else {
+                if (map.hasLayer(olsLayer)) {
+                    map.removeLayer(olsLayer);
+                }
+            }
+        });
+        
+        function loadRunways() {
+            if (!showRunways) return;
+
+            fetch('/obstacle-compliance/api/runways.geojson')
+                .then(response => response.json())
+                .then(data => {
+                    if (map.hasLayer(runwayLayer)) {
+                        map.removeLayer(runwayLayer);
+                    }
+                    runwayLayer = L.layerGroup();
+
+                    L.geoJSON(data, {
+                        filter: function(feature) {
+                            return feature.properties.kind === 'centerline';
+                        },
+                        style: function(feature) {
+                            return { color: '#f59e0b', weight: 3, opacity: 0.95 };
+                        },
+                        onEachFeature: function(feature, layer) {
+                            const p = feature.properties;
+                            const d1 = p.declared_1 || {}, d2 = p.declared_2 || {};
+                            layer.bindPopup(`
+                                <div style="min-width: 220px; max-width: 260px;">
+                                    <h6 style="margin-bottom: 5px; font-weight: 600; font-size: 14px;">
+                                        ${p.icao} RWY ${p.designator1}/${p.designator2}
+                                    </h6>
+                                    <p style="margin-bottom: 3px; font-size: 12px;">
+                                        <strong>Length:</strong> ${p.length_declared_m || p.length_m} m
+                                        <strong>Width:</strong> ${p.width_declared_m || 'N/A'} m<br>
+                                        <strong>Strip:</strong> ${p.strip_dimensions_m || 'N/A'}<br>
+                                        <strong>Approach:</strong> ${p.approach_category} (code ${p.code})
+                                        ${p.ofz && p.ofz !== 'NIL' ? '<br><strong>OFZ:</strong> ' + p.ofz : ''}
+                                    </p>
+                                    <table style="font-size: 11px; width: 100%; border-collapse: collapse;">
+                                        <tr><th></th><th>${p.designator1}</th><th>${p.designator2}</th></tr>
+                                        <tr><td>TORA</td><td>${d1.tora_m || '-'}</td><td>${d2.tora_m || '-'}</td></tr>
+                                        <tr><td>TODA</td><td>${d1.toda_m || '-'}</td><td>${d2.toda_m || '-'}</td></tr>
+                                        <tr><td>ASDA</td><td>${d1.asda_m || '-'}</td><td>${d2.asda_m || '-'}</td></tr>
+                                        <tr><td>LDA</td><td>${d1.lda_m || '-'}</td><td>${d2.lda_m || '-'}</td></tr>
+                                    </table>
+                                </div>
+                            `);
+                        }
+                    }).addTo(runwayLayer);
+
+                    L.geoJSON(data, {
+                        filter: function(feature) {
+                            return feature.properties.kind === 'strip';
+                        },
+                        style: function() {
+                            return { color: '#b45309', weight: 1.5, dashArray: '4 4', fillColor: '#f59e0b', fillOpacity: 0.08 };
+                        }
+                    }).addTo(runwayLayer);
+
+                    L.geoJSON(data, {
+                        filter: function(feature) {
+                            return feature.properties.kind === 'threshold';
+                        },
+                        pointToLayer: function(feature, latlng) {
+                            const p = feature.properties;
+                            return L.circleMarker(latlng, {
+                                radius: 4,
+                                color: '#dc2626',
+                                weight: 2,
+                                fillColor: '#ffffff',
+                                fillOpacity: 1
+                            }).bindTooltip(`${p.icao} ${p.designator}`, { permanent: false, direction: 'top' });
+                        }
+                    }).addTo(runwayLayer);
+
+                    if (!map.hasLayer(runwayLayer)) {
+                        runwayLayer.addTo(map);
+                    }
+                    document.getElementById('runwayCount').textContent = data.features.length / 4;
+                })
+                .catch(error => {
+                    console.error('Error loading runways:', error);
+                    showToast('Error loading runways', 'error');
+                });
+        }
+
+        function loadOls() {
+            if (!showOls) return;
+
+            fetch('/obstacle-compliance/api/ols.geojson')
+                .then(response => response.json())
+                .then(data => {
+                    if (map.hasLayer(olsLayer)) {
+                        map.removeLayer(olsLayer);
+                    }
+                    olsLayer = L.layerGroup();
+
+                    const surfaceColors = {
+                        approach: '#ef4444',
+                        take_off: '#f97316',
+                        inner_approach: '#a855f7',
+                        balked_landing: '#ec4899',
+                        inner_horizontal: '#3b82f6',
+                        conical: '#10b981',
+                        outer_horizontal: '#84cc16',
+                        strip: '#f59e0b',
+                        transitional: '#14b8a6'
+                    };
+
+                    L.geoJSON(data, {
+                        style: function(feature) {
+                            const base = surfaceColors[feature.properties.surface] || '#6b7280';
+                            return {
+                                color: base,
+                                weight: 1.5,
+                                opacity: 0.9,
+                                fillColor: base,
+                                fillOpacity: 0.12
+                            };
+                        },
+                        onEachFeature: function(feature, layer) {
+                            const p = feature.properties;
+                            layer.bindPopup(`
+                                <div style="max-width: 220px; font-size: 12px;">
+                                    <strong>${p.label}</strong><br>
+                                    ${p.icao || ''} &middot; ${p.category || ''} code ${p.code || ''}
+                                </div>
+                            `);
+                        }
+                    }).addTo(olsLayer);
+
+                    if (!map.hasLayer(olsLayer)) {
+                        olsLayer.addTo(map);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading OLS surfaces:', error);
+                    showToast('Error loading OLS surfaces', 'error');
+                });
+        }
         
         function loadAirports() {
             if (!showAirports) return;
