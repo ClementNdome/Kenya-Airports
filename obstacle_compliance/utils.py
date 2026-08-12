@@ -363,6 +363,81 @@ class ComplianceCalculator:
         self._ols_cache[key] = ols
         return ols
 
+    def terrain_breaches(self, airport, step_m=400, max_samples=12000):
+        """Detect places where natural terrain penetrates the controlling OLS.
+
+        Grid-samples the DEM over the airport's OLS extent (a box around the
+        ARP large enough to cover the outer horizontal / conical surfaces and
+        the approach wedges) and keeps every point whose ground elevation
+        exceeds the controlling Annex 14 ceiling. Returns a GeoJSON
+        FeatureCollection of breach points carrying per-point detail, plus a
+        metadata summary (worst breach, counts).
+        """
+        ols = self._airport_ols(airport)
+        arp_y, arp_x = float(airport.geom.y), float(airport.geom.x)
+        reach_m = 15200.0  # > outer horizontal (15000 m) and approach wedges
+        dlat = step_m / 110574.0
+        dlon = step_m / (111319.5 * max(0.2, math.cos(math.radians(arp_y))))
+
+        step = step_m
+        n_lat, n_lon = int(2 * reach_m / step) + 1, int(2 * reach_m / step) + 1
+        while n_lat * n_lon > max_samples and step < 5000:
+            step *= 1.5
+            dlat = step / 110574.0
+            dlon = step / (111319.5 * max(0.2, math.cos(math.radians(arp_y))))
+            n_lat, n_lon = int(2 * reach_m / step) + 1, int(2 * reach_m / step) + 1
+
+        features = []
+        breaches = 0
+        worst = 0.0
+        worst_point = None
+        samples = 0
+        for i in range(n_lat):
+            lat = arp_y + (i - n_lat // 2) * dlat
+            for j in range(n_lon):
+                lon = arp_x + (j - n_lon // 2) * dlon
+                d = geodesic((arp_y, arp_x), (lat, lon)).meters
+                if d > reach_m:
+                    continue
+                samples += 1
+                terrain = self.dem.get_elevation(Point(lon, lat, srid=4326))
+                if terrain <= 0:
+                    continue
+                ceiling = ols.ceiling_at(lat, lon)
+                if not ceiling:
+                    continue
+                breach = terrain - ceiling['ceiling_amsl']
+                if breach > 0:
+                    breaches += 1
+                    features.append({
+                        'type': 'Feature',
+                        'properties': {
+                            'icao': airport.icao_code,
+                            'breach_m': round(breach, 1),
+                            'terrain_m': round(terrain, 1),
+                            'ceiling_amsl': round(ceiling['ceiling_amsl'], 1),
+                            'surface': sorted(ceiling['surfaces'])[0],
+                        },
+                        'geometry': {'type': 'Point', 'coordinates': [lon, lat]},
+                    })
+                    if breach > worst:
+                        worst = breach
+                        worst_point = [lon, lat]
+
+        return {
+            'type': 'FeatureCollection',
+            'features': features,
+            'metadata': {
+                'icao_code': airport.icao_code,
+                'name': airport.name,
+                'step_m': round(step, 1),
+                'samples': samples,
+                'breach_count': breaches,
+                'worst_breach_m': round(worst, 1) if breaches else 0.0,
+                'worst_breach': worst_point,
+            },
+        }
+
     def _runway_geometry(self, runway):
         """Extract threshold coordinates/bearings from a runway LineString."""
         if runway.geom is None or runway.geom.geom_type != 'LineString' or runway.geom.num_coords < 2:
@@ -809,6 +884,51 @@ class ApplicationWorkflow:
             if to_status == 'approved':
                 application.certificate_number = f"KCAA-{datetime.now():%Y%m%d}-{application.id:05d}"
         application.save()
+
+
+def recheck_application_ols(application, actor=None):
+    """
+    Re-run the OLS compliance check for an application's property and
+    stamp the verdict snapshot. Notifies the owner when the verdict
+    changes. Returns (changed: bool, check) or (False, None) on failure.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    from .models import Notification
+    try:
+        check = application.property.run_compliance_check()
+    except Exception:
+        logger.exception(f"recheck_application_ols failed for application {application.pk}")
+        return False, None
+
+    pr = (check.result_json or {}).get('primary_result') or {}
+    old_status = application.last_status
+    old_score = application.last_score
+    new_status = check.status
+    new_score = check.score
+
+    application.last_status = new_status
+    application.last_score = new_score
+    application.last_ceiling_amsl = pr.get('max_allowed_agl')
+    application.last_headroom_m = pr.get('headroom')
+    application.last_checked = check.checked_at
+    application.save(update_fields=['last_status', 'last_score', 'last_ceiling_amsl',
+                                    'last_headroom_m', 'last_checked'])
+
+    changed = new_status != old_status or (old_score is not None and new_score != old_score)
+    if changed:
+        Notification.objects.create(
+            user=application.user,
+            notification_type='application_update',
+            title=f'Application #{application.pk} — OLS verdict changed',
+            message=(
+                f"Re-check by {getattr(actor, 'username', actor or 'system')}: "
+                f"verdict moved from {old_status or '—'} (score {old_score or '—'}) "
+                f"to {new_status} (score {round(new_score, 1) if new_score is not None else '—'})."
+            ),
+            link=reverse('obstacle_compliance:application_detail', args=[application.pk]),
+        )
+    return changed, check
 
 
 def process_bulk_upload(job):
