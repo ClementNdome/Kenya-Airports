@@ -1,0 +1,80 @@
+/* Geocode autocomplete dropdown (see geocode-widget.js) */
+.geocode-dropdown {
+    position: absolute;
+    z-index: 1050;
+    width: 100%;
+    max-height: 260px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    margin-top: 2px;
+}
+
+.geocode-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+}
+
+.geocode-item:hover {
+    background: #e9f2ff;
+}
+
+.geocode-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.geocode-type {
+    flex-shrink: 0;
+    color: #6c757d;
+    text-transform: capitalize;
+}
+
+.geocode-empty {
+    color: #6c757d;
+    cursor: default;
+}
+
+.geocode-item.active {
+    background: #e9f2ff;
+}
+
+.geocode-item.loading,
+.geocode-item.empty {
+    cursor: default;
+    justify-content: flex-start;
+    gap: 0.5rem;
+    color: #6c757d;
+}
+
+.geocode-spinner {
+    display: inline-block;
+    width: 0.9rem;
+    height: 0.9rem;
+    border: 2px solid rgba(13, 110, 253, 0.25);
+    border-top-color: #0d6efd;
+    border-radius: 50%;
+    animation: geocode-spin 0.7s linear infinite;
+}
+
+@keyframes geocode-spin {
+    to { transform: rotate(360deg); }
+}
+
+.geocode-type.airport {
+    background: #0d6efd;
+    color: #fff;
+    border-radius: 0.25rem;
+    padding: 0.05rem 0.4rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
