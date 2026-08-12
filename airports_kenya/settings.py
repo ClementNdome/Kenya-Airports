@@ -178,7 +178,8 @@ EMAIL_PORT = config('SMTP_PORT', default=587, cast=int)
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = config('SMTP_USER', default='')
 EMAIL_HOST_PASSWORD = config('SMTP_PASSWORD', default='')
-DEFAULT_FROM_EMAIL = config('SMTP_USER', default='')
+EMAIL_FROM_NAME = config('EMAIL_FROM_NAME', default='Obstacle Compliance App')
+DEFAULT_FROM_EMAIL = '{} <{}>'.format(EMAIL_FROM_NAME, config('SMTP_USER', default=''))
 SITE_URL = config('SITE_URL', default='http://127.0.0.1:8000')
 
 # Password reset
