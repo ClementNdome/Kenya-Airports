@@ -27,6 +27,9 @@ urlpatterns = [
     path('api/airports.geojson', views.AirportGeoJSONView.as_view(), name='api_airports'),
     path('api/runways.geojson', views.RunwaysGeoJSONView.as_view(), name='api_runways'),
     path('api/ols.geojson', views.OLSGeoJSONView.as_view(), name='api_ols'),
+    path('api/terrain-breaches.geojson', views.TerrainBreachesGeoJSONView.as_view(), name='api_terrain_breaches'),
+    path('api/flyover.geojson', views.FlyoverGeoJSONView.as_view(), name='api_flyover'),
+    path('api/skyline.geojson', views.SkylineGeoJSONView.as_view(), name='api_skyline'),
     
     # Search & Geocoding
     path('api/search/', views.SearchView.as_view(), name='api_search'),
@@ -91,6 +94,11 @@ urlpatterns = [
 
     # ============ MY PROPERTIES ON MAP & EXPORT ============
     path('api/my-properties.geojson', views.PropertiesGeoJSONView.as_view(), name='api_my_properties_geojson'),
+
+    # ============ USER LAYERS (persistent toggleable layers) ============
+    path('api/user-layers.geojson', views.UserLayersGeoJSONView.as_view(), name='api_user_layers'),
+    path('api/user-layers/save/', views.UserLayerSaveView.as_view(), name='api_user_layer_save'),
+    path('api/user-layers/<int:pk>/delete/', views.UserLayerDeleteView.as_view(), name='api_user_layer_delete'),
     path('my-properties/export/', views.PropertiesExportView.as_view(), name='property_export'),
 
     # ============ BULK UPLOAD PROCESS ============
