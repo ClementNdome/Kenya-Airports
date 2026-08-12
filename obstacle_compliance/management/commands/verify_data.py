@@ -17,7 +17,7 @@ class Command(BaseCommand):
             count = AerodromeBuffer.objects.filter(radius_km=radius).count()
             self.stdout.write(f"Buffers ({radius}km): {count}")
         
-        # 3. Verify each aerodrome has all buffers
+        # 3. Verify each aerodrome has all default buffers
         missing_buffers = []
         for aero in Aerodrome.objects.all():
             existing_radii = set(aero.buffers.values_list('radius_km', flat=True))

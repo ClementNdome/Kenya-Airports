@@ -74,7 +74,7 @@ class ObstacleComplianceDashboard(TemplateView):
             'zoom': 7,  # Slightly zoomed out to show more of Kenya
             'max_zoom': 18,
             'min_zoom': 6,
-            'default_radius': 15,
+            'default_radius': 10,
         }
         
         # Available basemap options
@@ -174,11 +174,11 @@ class AirportDetailView(DetailView):
         context['buffers'] = buffers
         
         # Get buffer at specific radius if requested
-        radius = self.request.GET.get('radius', 15)
+        radius = self.request.GET.get('radius', 10)
         try:
             context['selected_buffer'] = buffers.get(radius_km=int(radius))
         except (AerodromeBuffer.DoesNotExist, ValueError):
-            context['selected_buffer'] = buffers.filter(radius_km=15).first()
+            context['selected_buffer'] = buffers.filter(radius_km=10).first()
         
         # Count overlapping airports
         if context['selected_buffer']:
@@ -657,7 +657,7 @@ class MapView(TemplateView):
             'zoom': map_zoom,
             'max_zoom': 18,
             'min_zoom': 6,
-            'default_radius': int(self.request.GET.get('radius', 15)),
+            'default_radius': int(self.request.GET.get('radius', 10)),
         }
         
         # Get all airports for the airports list sidebar
@@ -724,7 +724,7 @@ class BufferGeoJSONView(View):
     @method_decorator(cache_page(60 * 15))
     def get(self, request):
         try:
-            radius_str = request.GET.get('radius', '15')
+            radius_str = request.GET.get('radius', '10')
             radius = int(float(radius_str))  # supports 7 or 7.5 (floors safely)
             if radius < 1:
                 radius = 1
@@ -732,27 +732,27 @@ class BufferGeoJSONView(View):
                 radius = 100
 
             icao = request.GET.get('icao')
+            buffer_type = (request.GET.get('type') or '').strip().lower()
+            if buffer_type not in ('arp', 'runway'):
+                buffer_type = None  # auto: runway when geometry exists, else ARP
 
             # === ENSURE BUFFERS EXIST (only creates missing ones, once ever) ===
-            runway_radii = (3, 5, 10)
             if icao:
                 try:
                     ad = Aerodrome.objects.get(icao_code=icao.upper())
-                    if radius in runway_radii:
-                        ad.get_or_create_runway_threshold_buffer(radius)
+                    if buffer_type == 'runway':
+                        ad.get_or_create_any_buffer(radius, 'runway')
                     else:
-                        ad.get_or_create_buffer(radius)
+                        ad.get_or_create_any_buffer(radius, 'arp')
                 except Aerodrome.DoesNotExist:
                     pass
             else:
                 # Bulk-create only what's missing (extremely fast after first time)
-                missing = Aerodrome.objects.exclude(buffers__radius_km=radius)
-                for ad in missing:
-                    if radius in runway_radii:
-                        if ad.runway_capsule(radius) is not None:
-                            ad.get_or_create_runway_threshold_buffer(radius)
-                            continue
-                    ad.get_or_create_buffer(radius)
+                has_rw = set(AerodromeRunway.objects.filter(
+                    geom__isnull=False).values_list('icao_code', flat=True))
+                for ad in Aerodrome.objects.exclude(buffers__radius_km=radius):
+                    want = buffer_type or ('runway' if ad.icao_code in has_rw else 'arp')
+                    ad.get_or_create_any_buffer(radius, want)
 
             # === NOW JUST QUERY THE DB (always fast) ===
             buffers_qs = AerodromeBuffer.objects.filter(
@@ -771,7 +771,7 @@ class BufferGeoJSONView(View):
                     buf.area_km2,
                     buf.id
                 )
-                feature['properties']['buffer_type'] = buf.type or 'circle'
+                feature['properties']['buffer_type'] = Aerodrome.buffer_type_of(buf.type or 'arp')
                 features.append(feature)
 
             return JsonResponse({
@@ -2064,7 +2064,7 @@ def debug_geojson(request):
             <h2>Test Links:</h2>
             <ul>
                 <li><a href="/obstacle-compliance/api/airports.geojson">Airports GeoJSON</a></li>
-                <li><a href="/obstacle-compliance/api/buffers.geojson?radius=15">Buffers GeoJSON (15km)</a></li>
+                <li><a href="/obstacle-compliance/api/buffers.geojson?radius=10">Buffers GeoJSON (10km)</a></li>
             </ul>
         """)
     except Exception as e:
@@ -2171,7 +2171,7 @@ class ApplicationSubmitView(View):
             messages.error(request, str(e))
             return redirect('obstacle_compliance:application_detail', pk=pk)
 
-        # Automatic OLS re-check at submission time (ADR + AC AGA005B):
+        # Automatic OLS re-check at submission time (ADR + AC AGA005C):
         # stamp the verdict snapshot on the application and alert on breach.
         try:
             from .utils import recheck_application_ols
