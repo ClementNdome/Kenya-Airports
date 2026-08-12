@@ -167,10 +167,19 @@ LOGIN_URL = '/obstacle-compliance/accounts/login/'
 LOGIN_REDIRECT_URL = '/obstacle-compliance/dashboard/'
 LOGOUT_REDIRECT_URL = '/obstacle-compliance/'
 
+# Trust the proxy (Cloud Run / Render) for the request scheme so absolute
+# links in emails are generated with https when TLS terminates at the proxy.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # Email configuration
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-DEFAULT_FROM_EMAIL = ''
-SITE_URL = 'http://127.0.0.1:8000'
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = config('SMTP_PORT', default=587, cast=int)
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = config('SMTP_USER', default='')
+EMAIL_HOST_PASSWORD = config('SMTP_PASSWORD', default='')
+DEFAULT_FROM_EMAIL = config('SMTP_USER', default='')
+SITE_URL = config('SITE_URL', default='http://127.0.0.1:8000')
 
 # Password reset
 PASSWORD_RESET_TIMEOUT = 86400  # 24 hours
