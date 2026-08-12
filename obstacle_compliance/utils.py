@@ -4,7 +4,6 @@ import io
 import logging
 import math
 import os
-import re
 from datetime import datetime
 from io import BytesIO
 
@@ -21,20 +20,26 @@ from geopy.distance import geodesic
 from xhtml2pdf import pisa
 
 from .models import Aerodrome, AerodromeBuffer, AerodromeRunway
+from .ols_surfaces import (
+    AirportOLS,
+    RunwayOLS,
+    reference_code,
+    IHS_HEIGHT,
+    IHS_RADIUS,
+    CONICAL_HEIGHT,
+    CONICAL_SLOPE,
+)
 # from dotenv import load_dotenv
 import os
 from decouple import config
 # load_dotenv()
 logger = logging.getLogger(__name__)
 
-# Constants from KCAA/ICAO
-IHS_RADIUS = 4000  # 4km Inner Horizontal Surface
-IHS_HEIGHT = 45    # 45m above aerodrome elevation
-CONICAL_SLOPE = 0.05  # 5% (1:20) rise
-CONICAL_END = 6000    # Conical zone ends at 6km
+# Regulatory zone per KCAA AC AGA005B (15 km) and lighting threshold
+# (30 m AGL) - the outer-horizontal significance criteria are applied
+# per runway code in ols_surfaces.OLS.
 KCAA_ZONE = 15000     # 15km regulatory zone
 LIGHTING_THRESHOLD = 30  # Lighting required for structures >30m within 15km
-HIGH_RISE_THRESHOLD = 90  # Additional lighting threshold for very tall structures
 
 def initial_bearing_rad(lat1, lon1, lat2, lon2):
     """Initial bearing in radians (clockwise from north) between two points."""
@@ -266,32 +271,33 @@ class ComplianceCalculator:
         self.dem = DEMService()  # Assuming DEMService is defined elsewhere
         self._cache_timeout = 3600  # 1 hour cache for calculations
 
-    def calculate_ols_ceiling(self, airport_elevation, distance_m):
+    def calculate_ols_ceiling(self, airport_elevation, distance_m, code=4, category='non_precision'):
         """
-        Calculate Obstacle Limitation Surface ceiling at given distance
-        Based on KCAA/ICAO conical surface formula
-        
-        Args:
-            airport_elevation: Airport elevation in meters AMSL
-            distance_m: Distance from airport reference point in meters
-        
+        Calculate ARP-based OLS ceiling (inner horizontal + conical) at a
+        given distance from the aerodrome reference point, using the
+        Annex 14 Table 4-1 dimensions for the runway code/category.
+
         Returns:
-            float: Maximum allowed height in meters AMSL, or None if beyond conical zone
+            float: Maximum allowed height in meters AMSL, or None if beyond
+            the conical surface.
         """
         if distance_m < 0:
             logger.warning(f"Negative distance provided: {distance_m}m")
             return None
-            
-        if distance_m <= IHS_RADIUS:
+
+        radius = IHS_RADIUS.get(category, IHS_RADIUS['non_precision']).get(code, 4000.0)
+        height = CONICAL_HEIGHT.get(category, CONICAL_HEIGHT['non_precision']).get(code, 100.0)
+        end = radius + height / CONICAL_SLOPE
+
+        if distance_m <= radius:
             # Inner Horizontal Surface - constant height
             return airport_elevation + IHS_HEIGHT
-            
-        elif distance_m <= CONICAL_END:
+        elif distance_m <= end:
             # Conical surface - rises at 5% from IHS edge
-            extra_height = (distance_m - IHS_RADIUS) * CONICAL_SLOPE
+            extra_height = (distance_m - radius) * CONICAL_SLOPE
             return airport_elevation + IHS_HEIGHT + extra_height
         else:
-            # Beyond conical zone (>6km), no OLS restriction
+            # Beyond conical surface, no OLS restriction
             # But still within 15km regulatory zone for lighting requirements
             return None
 
@@ -323,28 +329,39 @@ class ComplianceCalculator:
             return point1_3857.distance(point2_3857)
 
     # =========================================================
-    # RUNWAY-BASED OLS (Annex 14) - declared runway geometry when
-    # available, else falls back to the centroid approximation.
+    # RUNWAY-BASED OLS (Annex 14 Table 4-1/4-2, KCAA AC AGA005B)
+    # - full surface set via ols_surfaces.RunwayOLS/AirportOLS.
     # =========================================================
-    APPROACH_SLOPE = 0.02            # 2% (1:50) approach surface
-    APPROACH_LENGTH_M = 3000.0       # approach surface length (code 3/4)
-    APPROACH_DIVERGENCE = 0.15       # 15% lateral divergence
-    TRANSITIONAL_SLOPE = 1.0 / 7.0   # 1:7 transitional surface
 
-    @staticmethod
-    def _strip_half_width(runway):
-        """Strip half-width in metres per side (best effort)."""
-        hw = 75.0
-        if runway.length_declared_m and runway.length_declared_m >= 1800:
-            hw = 150.0
-        raw = runway.strip_dimensions or runway.strip_dimensions_m
-        if raw:
-            m = re.search(r'(\d+(?:\.\d+)?)\s*m', str(raw))
-            if m:
-                val = float(m.group(1))
-                if val >= 60:
-                    hw = val
-        return hw
+    def _airport_ols(self, airport):
+        """Build (and cache) the AirportOLS model for an aerodrome."""
+        if getattr(self, '_ols_cache', None) is None:
+            self._ols_cache = {}
+        key = airport.icao_code
+        if key in self._ols_cache:
+            return self._ols_cache[key]
+
+        try:
+            runways = list(AerodromeRunway.objects.filter(icao_code=airport.icao_code))
+        except Exception:
+            runways = []
+        rw_models = []
+        for rwy in runways:
+            g = self._runway_geometry(rwy)
+            if not g:
+                continue
+            g['category'] = (rwy.approach_category or 'non_precision')
+            g['code'] = reference_code(rwy.length_declared_m or g['length_m'])
+            rw_models.append(RunwayOLS(g))
+        ols = AirportOLS(
+            arp_lat=float(airport.geom.y),
+            arp_lon=float(airport.geom.x),
+            arp_elev_m=float(airport.elevation_m or 0),
+            runways=rw_models,
+            default_config={'code': 4, 'category': 'non_precision'},
+        )
+        self._ols_cache[key] = ols
+        return ols
 
     def _runway_geometry(self, runway):
         """Extract threshold coordinates/bearings from a runway LineString."""
@@ -375,66 +392,25 @@ class ComplianceCalculator:
     def calculate_runway_ceiling(self, prop_point, airport):
         """Annex 14 OLS ceiling at a point using declared runway geometry.
 
-        Evaluates approach surfaces (2% from each threshold), transitional
-        surfaces (1:7 from strip edge) plus the universal Inner Horizontal
-        Surface (flat 45m within 4km) and conical surface (5% 4-6km) measured
-        from the aerodrome reference point. The controlling ceiling is the
-        minimum across every applicable surface.
+        Evaluates the full per-runway surface set (approach, inner approach,
+        transitional, inner transitional, balked landing, take-off climb)
+        plus the ARP-based inner horizontal and conical surfaces, using the
+        Table 4-1/4-2 dimensions for the runway code and approach category.
+        The controlling ceiling is the minimum across every applicable
+        surface.
 
         Returns dict with 'ceiling_amsl', 'surfaces', 'distance_m' or None
         when no runway data applies at this point.
         """
-        try:
-            runways = list(AerodromeRunway.objects.filter(icao_code=airport.icao_code))
-        except Exception:
-            runways = []
-        if not runways:
+        ols = self._airport_ols(airport)
+        if not ols.runways:
             return None
 
-        lat, lon = prop_point.y, prop_point.x
-        ceilings = []  # [(ceiling_amsl, surface_label)]
-
-        for rwy in runways:
-            g = self._runway_geometry(rwy)
-            if not g:
-                continue
-            hw = self._strip_half_width(rwy)
-            length_m = g['length_m']
-            ends = [
-                (g['t1'], g['elev1_m'], g['bearing_rad'], g['designator1']),
-                (g['t2'], g['elev2_m'], (g['bearing_rad'] + math.pi) % (2 * math.pi) - math.pi, g['designator2']),
-            ]
-            for (thr, elev, bearing, label) in ends:
-                d_along, d_perp = along_perp_dist(thr[0], thr[1], bearing, lat, lon)
-                # Approach surface: 2% rising from threshold, diverging 15%
-                if 0.0 <= d_along <= self.APPROACH_LENGTH_M:
-                    half_w = hw + self.APPROACH_DIVERGENCE * d_along
-                    if abs(d_perp) <= half_w:
-                        ceilings.append((elev + self.APPROACH_SLOPE * d_along, 'approach_%s' % label))
-                # Transitional surface: 1:7 upward from strip edge, along the strip
-                if 0.0 <= d_along <= length_m and abs(d_perp) > hw:
-                    ceilings.append((elev + (abs(d_perp) - hw) * self.TRANSITIONAL_SLOPE, 'transitional_%s' % label))
-
-        # Universal IHS + conical from ARP
-        distance_m = self.calculate_distance(prop_point, airport.geom, method='geodesic')
-        airport_elev = float(airport.elevation_m or 0)
-        if distance_m is not None:
-            if distance_m <= IHS_RADIUS:
-                ceilings.append((airport_elev + IHS_HEIGHT, 'horizontal'))
-            elif distance_m <= CONICAL_END:
-                ceilings.append((airport_elev + IHS_HEIGHT + (distance_m - IHS_RADIUS) * CONICAL_SLOPE, 'conical'))
-
-        if not ceilings:
+        result = ols.ceiling_at(prop_point.y, prop_point.x)
+        if not result:
             return None
-        ceilings.sort(key=lambda x: x[0])
-        min_ceiling = ceilings[0][0]
-        surfaces = sorted(set(name for c, name in ceilings if abs(c - min_ceiling) < 0.5))
-        return {
-            'ceiling_amsl': min_ceiling,
-            'surfaces': surfaces,
-            'distance_m': distance_m,
-            'runway_count': len(runways),
-        }
+        result['runway_count'] = len(ols.runways)
+        return result
 
     def evaluate_property(self, prop_point, prop_height_agl, airport, use_cache=True):
         """
@@ -498,8 +474,18 @@ class ComplianceCalculator:
             building_top_amsl = ground_amsl + prop_height_agl
             airport_elev = airport.elevation_m or 0
             
-            # Calculate OLS ceiling - runway-based Annex 14 surfaces when
-            # declared runway data exists, otherwise centroid approximation
+            # Zone extents from the aerodrome's runway configurations
+            ols = self._airport_ols(airport)
+            ihs_radius_max = 0.0
+            conical_end_max = 0.0
+            for category, code in ols._arp_configs():
+                r = IHS_RADIUS.get(category, IHS_RADIUS['non_precision']).get(code, 4000.0)
+                h = CONICAL_HEIGHT.get(category, CONICAL_HEIGHT['non_precision']).get(code, 100.0)
+                ihs_radius_max = max(ihs_radius_max, r)
+                conical_end_max = max(conical_end_max, r + h / CONICAL_SLOPE)
+
+            # Calculate OLS ceiling - full Annex 14 runway-based surface set
+            # when declared runway data exists, otherwise ARP approximation
             runway_ols = self.calculate_runway_ceiling(prop_point, airport)
             if runway_ols:
                 ols_ceiling = runway_ols['ceiling_amsl']
@@ -507,15 +493,15 @@ class ComplianceCalculator:
             else:
                 ols_ceiling = self.calculate_ols_ceiling(airport_elev, distance_m)
                 if ols_ceiling is not None:
-                    surfaces_checked = ['horizontal'] if distance_m <= IHS_RADIUS else ['conical']
+                    surfaces_checked = ['inner_horizontal'] if distance_m <= ihs_radius_max else ['conical']
                 else:
                     surfaces_checked = []
-            
+
             # Determine hazard status and restrictions
             is_hazard = False
             max_allowed = None
             headroom = None
-            
+
             if ols_ceiling is not None:
                 max_allowed_amsl = ols_ceiling
                 max_allowed_agl = max(0, max_allowed_amsl - ground_amsl)  # Can't be negative
@@ -523,20 +509,28 @@ class ComplianceCalculator:
                 headroom = round(max_allowed_agl - prop_height_agl, 1)
                 is_hazard = building_top_amsl > ols_ceiling
             else:
-                max_allowed = None  # No OLS restriction beyond conical zone
-            
-            # Determine lighting requirements (per KCAA circular)
+                max_allowed = None  # No OLS restriction beyond conical surface
+
+            # Determine lighting requirements
+            # AC AGA005B 4.2.1.3: objects higher than 30m AGL and higher than
+            # 150m above aerodrome elevation within 15km are significant and
+            # require lighting/marking (AC AGA032A).
             requires_lighting = False
             lighting_reason = None
-            
-            if distance_km <= (KCAA_ZONE / 1000):
-                if prop_height_agl >= HIGH_RISE_THRESHOLD:
-                    requires_lighting = True
-                    lighting_reason = f"High-rise structure ({prop_height_agl}m) requires lighting per KCAA circular"
-                elif prop_height_agl >= LIGHTING_THRESHOLD:
-                    requires_lighting = True
-                    lighting_reason = f"Structure height ({prop_height_agl}m) exceeds {LIGHTING_THRESHOLD}m within 15km zone"
-            
+            light_levels = 0
+
+            if is_hazard:
+                requires_lighting = True
+                lighting_reason = "Obstacle penetrates an obstacle limitation surface - lighting and marking required (AC AGA032A)"
+            elif (distance_km <= (KCAA_ZONE / 1000)
+                    and prop_height_agl > LIGHTING_THRESHOLD
+                    and building_top_amsl > airport_elev + 150.0):
+                requires_lighting = True
+                lighting_reason = f"Structure {prop_height_agl}m AGL higher than {LIGHTING_THRESHOLD}m and 150m above aerodrome elevation within 15km (AC AGA005B)"
+            if requires_lighting:
+                # AC AGA032A: obstacle light levels spaced every 45m of height
+                light_levels = max(1, math.ceil(prop_height_agl / 45.0))
+
             # Determine status color and message
             if is_hazard:
                 status = "RED"
@@ -547,12 +541,13 @@ class ComplianceCalculator:
             else:
                 status = "GREEN"
                 status_message = "CLEAR - Outside all restriction zones"
-            
+
             # Build result dictionary
             result = {
                 "is_hazard": is_hazard,
                 "requires_lighting": requires_lighting,
                 "lighting_reason": lighting_reason,
+                "light_levels": light_levels,
                 "distance_km": round(distance_km, 2),
                 "distance_m": round(distance_m, 1),
                 "status": status,
@@ -565,8 +560,8 @@ class ComplianceCalculator:
                 "ols_ceiling_amsl": round(ols_ceiling, 1) if ols_ceiling is not None else None,
                 "surfaces_checked": surfaces_checked,
                 "within_15km_zone": distance_km <= (KCAA_ZONE / 1000),
-                "within_conical_zone": distance_m <= CONICAL_END,
-                "within_ihs_zone": distance_m <= IHS_RADIUS
+                "within_conical_zone": distance_m <= conical_end_max,
+                "within_ihs_zone": distance_m <= ihs_radius_max
             }
             
             # Cache the result

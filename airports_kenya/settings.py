@@ -15,6 +15,8 @@ DEBUG = config("DEBUG", default=False)
 
 # Mapbox Geocoding API token (server-side only - never expose sk. tokens to the client)
 MAPBOX_ACCESS_TOKEN = config("MAPBOX_ACCESS_TOKEN", default="")
+# Mapbox client (pk.) token - safe to embed in browser-side map rendering (e.g. GL JS)
+MAPBOX_PUBLIC_ACCESS_TOKEN = config("MAPBOX_PUBLIC_ACCESS_TOKEN", default="")
 # ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="*").split(",")  # <-- Read from .env
 ALLOWED_HOSTS = ["*"]
 
