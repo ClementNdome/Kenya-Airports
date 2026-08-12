@@ -1,8 +1,10 @@
 # obstacle_compliance/urls.py
 
 from django.urls import path, include
+from django.views.generic import TemplateView
 from django.contrib.auth import views as auth_views
 from . import views
+from .forms import VerificationAwareAuthenticationForm as UserVerificationAuthenticationForm
 
 app_name = 'obstacle_compliance'
 
@@ -50,9 +52,14 @@ urlpatterns = [
 
     # ============ AUTHENTICATION (Feature 1) ============
     path('accounts/register/', views.RegisterView.as_view(), name='register'),
-    path('accounts/login/', auth_views.LoginView.as_view(), name='login'),
+    path('accounts/login/', auth_views.LoginView.as_view(
+        authentication_form=UserVerificationAuthenticationForm,
+    ), name='login'),
     path('accounts/logout/', auth_views.LogoutView.as_view(), name='logout'),
     path('accounts/profile/', views.ProfileView.as_view(), name='profile'),
+    path('accounts/verify-email/<str:uidb64>/<str:token>/', views.ActivateAccountView.as_view(), name='verify_email'),
+    path('accounts/verify-email/sent/', TemplateView.as_view(template_name='registration/verification_sent.html'), name='verification_sent'),
+    path('accounts/verify-email/resend/', views.ResendVerificationView.as_view(), name='resend_verification'),
 
     # ============ PROPERTY PORTFOLIO (Feature 1) ============
     path('my-properties/', views.PropertyListView.as_view(), name='property_list'),

@@ -28,13 +28,19 @@ from django.views.decorators.cache import cache_page
 from django.core.paginator import Paginator
 from django.urls import reverse, reverse_lazy
 from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth import login
+from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.core.mail import EmailMessage
 
 from .models import Aerodrome, AerodromeBuffer, AerodromeRunway, DeclaredDistance, UserProfile, Property, ComplianceCheck, Notification, ComplianceApplication, BulkUploadJob, UserLayer
 from .utils import ComplianceCalculator, DEMService, ApplicationWorkflow
 from .ols_surfaces import RunwayOLS, reference_code, destination_point_rad
+from .forms import UserRegistrationForm
 from obstacle_compliance import models
 
 logger = logging.getLogger(__name__)
@@ -235,7 +241,7 @@ class AirportDetailView(DetailView):
 # PROPERTY COMPLIANCE VIEWS
 # ============================================
 
-class PropertyComplianceView(TemplateView):
+class PropertyComplianceView(LoginRequiredMixin, TemplateView):
     """
     View for checking property compliance
     """
@@ -1629,15 +1635,72 @@ class DistanceBetweenAirportsAPI(View):
 # AUTHENTICATION VIEWS (Feature 1)
 # ============================================
 
+def send_verification_email(request, user):
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+    verify_path = reverse('obstacle_compliance:verify_email', kwargs={'uidb64': uid, 'token': token})
+    link = request.build_absolute_uri(verify_path)
+    subject = 'Verify your KCAA Obstacle Compliance account'
+    body = render_to_string('registration/verification_email.html', {
+        'user': user,
+        'verification_link': link,
+    })
+    email = EmailMessage(subject, body, settings.DEFAULT_FROM_EMAIL, [user.email])
+    email.content_subtype = 'html'
+    email.send()
+
+
 class RegisterView(CreateView):
-    form_class = UserCreationForm
+    form_class = UserRegistrationForm
     template_name = 'registration/register.html'
-    success_url = reverse_lazy('obstacle_compliance:login')
+    success_url = reverse_lazy('obstacle_compliance:verification_sent')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['title'] = 'Create Account'
         return context
+
+    def form_valid(self, form):
+        user = form.save(commit=False)
+        user.is_active = False
+        user.save()
+        next_url = self.request.GET.get('next')
+        if next_url:
+            self.request.session['next_after_verify'] = next_url
+        send_verification_email(self.request, user)
+        return redirect(self.success_url)
+
+
+class ActivateAccountView(View):
+    def get(self, request, uidb64, token):
+        try:
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = models.User.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, models.User.DoesNotExist):
+            user = None
+        if user is not None and default_token_generator.check_token(user, token):
+            if not user.is_active:
+                user.is_active = True
+                user.save()
+                user.profile.email_verified = True
+                user.profile.save()
+            login(request, user)
+            messages.success(request, 'Your email has been verified and your account is now active.')
+            next_url = request.session.pop('next_after_verify', None)
+            if next_url and next_url.startswith('/'):
+                return redirect(next_url)
+            return redirect(reverse('obstacle_compliance:user_dashboard'))
+        return render(request, 'registration/verification_failed.html', status=400)
+
+
+class ResendVerificationView(View):
+    def get(self, request):
+        username = request.GET.get('username', '')
+        user = models.User.objects.filter(username=username).first()
+        if user is not None and not user.is_active:
+            send_verification_email(request, user)
+            return render(request, 'registration/verification_sent.html', {'resend': True})
+        return redirect('obstacle_compliance:login')
 
 
 class ProfileView(LoginRequiredMixin, UpdateView):
@@ -2258,7 +2321,7 @@ class AnalyticsDashboardView(LoginRequiredMixin, TemplateView):
         total_applications = ComplianceApplication.objects.filter(user=user).count()
 
         aerodromes_total = Aerodrome.objects.count()
-        aerodromes_by_type = Aerodrome.objects.values('type').annotate(count=Count('id'))
+        aerodromes_by_type = Aerodrome.objects.values('type').annotate(count=Count('fid'))
 
         ctx.update({
             'total_properties': total_properties,
