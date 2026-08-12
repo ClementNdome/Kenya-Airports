@@ -32,9 +32,9 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 
-from .models import Aerodrome, AerodromeBuffer, AerodromeRunway, DeclaredDistance, UserProfile, Property, ComplianceCheck, Notification, ComplianceApplication, BulkUploadJob
+from .models import Aerodrome, AerodromeBuffer, AerodromeRunway, DeclaredDistance, UserProfile, Property, ComplianceCheck, Notification, ComplianceApplication, BulkUploadJob, UserLayer
 from .utils import ComplianceCalculator, DEMService, ApplicationWorkflow
-from .ols_surfaces import RunwayOLS, reference_code
+from .ols_surfaces import RunwayOLS, reference_code, destination_point_rad
 from obstacle_compliance import models
 
 logger = logging.getLogger(__name__)
@@ -623,6 +623,7 @@ class MapView(TemplateView):
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context['mapbox_token'] = getattr(settings, 'MAPBOX_PUBLIC_ACCESS_TOKEN', '')
         
         # Get active airport if specified
         icao = self.request.GET.get('airport')
@@ -733,16 +734,24 @@ class BufferGeoJSONView(View):
             icao = request.GET.get('icao')
 
             # === ENSURE BUFFERS EXIST (only creates missing ones, once ever) ===
+            runway_radii = (3, 5, 10)
             if icao:
                 try:
                     ad = Aerodrome.objects.get(icao_code=icao.upper())
-                    ad.get_or_create_buffer(radius)
+                    if radius in runway_radii:
+                        ad.get_or_create_runway_threshold_buffer(radius)
+                    else:
+                        ad.get_or_create_buffer(radius)
                 except Aerodrome.DoesNotExist:
                     pass
             else:
                 # Bulk-create only what's missing (extremely fast after first time)
                 missing = Aerodrome.objects.exclude(buffers__radius_km=radius)
                 for ad in missing:
+                    if radius in runway_radii:
+                        if ad.runway_capsule(radius) is not None:
+                            ad.get_or_create_runway_threshold_buffer(radius)
+                            continue
                     ad.get_or_create_buffer(radius)
 
             # === NOW JUST QUERY THE DB (always fast) ===
@@ -755,13 +764,15 @@ class BufferGeoJSONView(View):
 
             features = []
             for buf in buffers_qs[:100]:
-                features.append(self._format_feature(
+                feature = self._format_feature(
                     buf.geom.geojson,
                     buf.aerodrome,
                     buf.radius_km,
                     buf.area_km2,
                     buf.id
-                ))
+                )
+                feature['properties']['buffer_type'] = buf.type or 'circle'
+                features.append(feature)
 
             return JsonResponse({
                 'type': 'FeatureCollection',
@@ -1023,6 +1034,200 @@ class OLSGeoJSONView(View):
         except Exception as e:
             logger.error(f"OLSGeoJSONView error: {str(e)}", exc_info=True)
             return JsonResponse({'type': 'FeatureCollection', 'features': []})
+
+
+class FlyoverGeoJSONView(View):
+    """Flight path + ceiling profile for the 4D flyover simulation.
+    GET /api/flyover.geojson?icao=HKJK&step=250
+    Returns the approach path as colour-coded segments (clear/warn/breach)
+    plus per-vertex altitudes and controlling OLS ceilings.
+    """
+    @method_decorator(cache_page(60 * 15))
+    def get(self, request):
+        import math
+        try:
+            icao = (request.GET.get('icao') or '').upper()
+            ad = Aerodrome.objects.filter(icao_code=icao).first()
+            if not ad:
+                return JsonResponse({'type': 'FeatureCollection', 'features': [],
+                                     'metadata': {'error': 'Unknown aerodrome'}})
+            ols = calculator._airport_ols(ad)
+            if not ols.runways:
+                return JsonResponse({'type': 'FeatureCollection', 'features': [],
+                                     'metadata': {'error': 'No runways for ' + icao}})
+            rw = max(ols.runways, key=lambda r: r.length_m)
+            try:
+                step = max(100.0, min(float(request.GET.get('step', 250)), 1000.0))
+            except (TypeError, ValueError):
+                step = 250.0
+
+            b = rw.bearing                         # t1 -> t2
+            b_back = (b + math.pi) % (2 * math.pi)
+            t1 = rw.rw['t1']
+            behind = 16000.0                       # start 16 km beyond the threshold
+            rollout = 2500.0                       # continue past the threshold
+            total = behind + rollout
+            start_agl = behind * math.tan(math.radians(3.0))   # 3-degree glide slope
+            origin = destination_point_rad(t1[0], t1[1], b_back, behind)
+
+            coords, agls, ceilings, statuses = [], [], [], []
+            d = 0.0
+            n = 0
+            while d <= total + 1e-6:
+                pt = destination_point_rad(origin[0], origin[1], b, d)
+                agl = max(0.0, start_agl * (1.0 - d / behind))
+                ceiling = ols.ceiling_at(pt[0], pt[1])
+                ceiling_amsl = ceiling['ceiling_amsl'] if ceiling else None
+                # ceiling rise above the departure runway threshold datum
+                rise = (ceiling_amsl - rw.elev1) if ceiling_amsl is not None else None
+                if rise is None or agl > rise + 10.0:
+                    status = 'clear'
+                elif agl > rise:
+                    status = 'warn'
+                else:
+                    status = 'breach'
+                coords.append([round(pt[1], 6), round(pt[0], 6)])
+                agls.append(round(agl, 1))
+                ceilings.append(round(rise, 1) if rise is not None else None)
+                statuses.append(status)
+                d += step
+                n += 1
+
+            segments = []
+            start = 0
+            for i in range(1, n + 1):
+                if i == n or statuses[i] != statuses[start]:
+                    segments.append({
+                        'status': statuses[start],
+                        'coords': coords[start:i],
+                    })
+                    start = i
+
+            features = [{
+                'type': 'Feature',
+                'properties': {'status': seg['status'], 'icao': icao,
+                               'runway': f"{rw.rw.get('designator1', '?')}/{rw.rw.get('designator2', '?')}"},
+                'geometry': {'type': 'LineString', 'coordinates': seg['coords']},
+            } for seg in segments]
+
+            return JsonResponse({
+                'type': 'FeatureCollection',
+                'features': features,
+                'metadata': {
+                    'icao': icao, 'step_m': step, 'start_agl': round(start_agl, 1),
+                    'agls': agls, 'ceilings': ceilings, 'statuses': statuses,
+                    'threshold': [t1[1], t1[0]],
+                    'runway': f"{rw.rw.get('designator1', '?')}/{rw.rw.get('designator2', '?')}",
+                    'speed_mps': 70.0, 'total_m': total, 'points': n,
+                },
+            })
+        except Exception as e:
+            logger.error(f"FlyoverGeoJSONView error: {str(e)}", exc_info=True)
+            return JsonResponse({'type': 'FeatureCollection', 'features': [],
+                                 'metadata': {'error': str(e)}})
+
+
+class SkylineGeoJSONView(View):
+    """Max allowed building height across the map (grid over the airport area).
+
+    GET /api/skyline.geojson?icao=HKJK&step=1000
+    Each grid cell carries max_height_agl = OLS ceiling (AMSL) minus terrain
+    elevation - the tallest structure you may build there.
+    """
+    @method_decorator(cache_page(60 * 15))
+    def get(self, request):
+        try:
+            icao = (request.GET.get('icao') or '').upper()
+            ad = Aerodrome.objects.filter(icao_code=icao).first()
+            if not ad or ad.geom is None:
+                return JsonResponse({'type': 'FeatureCollection', 'features': [],
+                                     'metadata': {'error': 'Unknown aerodrome'}})
+            try:
+                step = max(500, min(float(request.GET.get('step', 1000)), 2000))
+            except (TypeError, ValueError):
+                step = 1000.0
+            half = 9000.0
+            ols = calculator._airport_ols(ad)
+            import math
+            from django.contrib.gis.geos import Point as GEOSPoint
+            features = []
+            c_lat, c_lon = ad.geom.y, ad.geom.x
+            lat_per_m = 1.0 / 110574.0
+            lon_per_m = 1.0 / (111320.0 * math.cos(math.radians(c_lat)))
+            n = int(half * 2 / step)
+            vals = []
+            for i in range(n + 1):
+                for j in range(n + 1):
+                    lat0 = c_lat + (i - n / 2) * step * lat_per_m
+                    lon0 = c_lon + (j - n / 2) * step * lon_per_m
+                    lat1 = lat0 + step * lat_per_m
+                    lon1 = lon0 + step * lon_per_m
+                    clat, clon = (lat0 + lat1) / 2, (lon0 + lon1) / 2
+                    ceiling = ols.ceiling_at(clat, clon)
+                    ceiling_amsl = ceiling['ceiling_amsl'] if ceiling else None
+                    try:
+                        elev = calculator.dem.get_elevation(GEOSPoint(clon, clat, srid=4326))
+                    except Exception:
+                        elev = float(ad.elevation_m or 0)
+                    max_h = None
+                    if ceiling_amsl is not None:
+                        max_h = max(0.0, round(ceiling_amsl - elev, 1))
+                    vals.append(max_h if max_h is not None else -1)
+                    features.append({
+                        'type': 'Feature',
+                        'properties': {
+                            'max_height_agl': max_h,
+                            'ceiling_amsl': ceiling_amsl,
+                            'terrain_m': round(elev, 1) if elev else None,
+                        },
+                        'geometry': {
+                            'type': 'Polygon',
+                            'coordinates': [[
+                                [lon0, lat0], [lon1, lat0],
+                                [lon1, lat1], [lon0, lat1], [lon0, lat0],
+                            ]],
+                        },
+                    })
+            present = [v for v in vals if v is not None and v >= 0]
+            return JsonResponse({
+                'type': 'FeatureCollection',
+                'features': features,
+                'metadata': {
+                    'icao': icao, 'step_m': step, 'cells': len(features),
+                    'min_height': round(min(present), 1) if present else None,
+                    'max_height': round(max(present), 1) if present else None,
+                },
+            })
+        except Exception as e:
+            logger.error(f"SkylineGeoJSONView error: {str(e)}", exc_info=True)
+            return JsonResponse({'type': 'FeatureCollection', 'features': [],
+                                 'metadata': {'error': str(e)}})
+
+
+class TerrainBreachesGeoJSONView(View):
+    """
+    Places where natural terrain penetrates the controlling OLS ceiling
+    (Annex 14 surfaces vs DEM samples). GET /api/terrain-breaches.geojson
+    ?icao=HKJK&step=400 - results are cached 15 minutes.
+    """
+    @method_decorator(cache_page(60 * 15))
+    def get(self, request):
+        try:
+            icao = (request.GET.get('icao') or '').upper()
+            ad = Aerodrome.objects.filter(icao_code=icao).first()
+            if not ad:
+                return JsonResponse({'type': 'FeatureCollection', 'features': [],
+                                     'metadata': {'error': 'Unknown aerodrome'}})
+            try:
+                step = max(200, min(float(request.GET.get('step', 400)), 2000))
+            except (TypeError, ValueError):
+                step = 400.0
+            data = calculator.terrain_breaches(ad, step_m=step)
+            return JsonResponse(data)
+        except Exception as e:
+            logger.error(f"TerrainBreachesGeoJSONView error: {str(e)}", exc_info=True)
+            return JsonResponse({'type': 'FeatureCollection', 'features': [],
+                                 'metadata': {'error': str(e)}})
 
 # ============================================
 # SEARCH AND AUTOCOMPLETE VIEWS
@@ -1554,6 +1759,75 @@ class SavePropertyFromCheckView(LoginRequiredMixin, View):
 
 
 # ============================================
+# USER LAYERS (persistent toggleable layers)
+# ============================================
+
+class UserLayersGeoJSONView(LoginRequiredMixin, View):
+    """GeoJSON of the current user's saved layers."""
+
+    def get(self, request):
+        features = []
+        for layer in request.user.layers.prefetch_related('user'):
+            if layer.geometry is None:
+                continue
+            feats = layer.geometry.geojson
+            features.append({
+                'type': 'Feature',
+                'geometry': json.loads(feats),
+                'properties': {
+                    'id': layer.pk,
+                    'name': layer.name,
+                    'layer_type': layer.layer_type,
+                    'created_at': layer.created_at.isoformat() if layer.created_at else None,
+                },
+            })
+        return JsonResponse({'type': 'FeatureCollection', 'features': features})
+
+
+class UserLayerSaveView(LoginRequiredMixin, View):
+    """Save a named layer from a GeoJSON geometry or snapshot a property result."""
+
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+            name = (data.get('name') or '').strip()[:255]
+            if not name:
+                return JsonResponse({'error': 'Layer name is required'}, status=400)
+            layer_type = data.get('layer_type') or 'custom'
+            if layer_type not in dict(UserLayer.LAYER_TYPES):
+                return JsonResponse({'error': 'Invalid layer_type'}, status=400)
+            props = data.get('properties') or {}
+            geom = None
+            if data.get('geometry'):
+                geom = GEOSGeometry(json.dumps(data['geometry']))
+                if not geom.valid:
+                    geom = geom.buffer(0)
+                geom.srid = 4326
+            elif data.get('property_id'):
+                prop = get_object_or_404(Property, pk=data['property_id'], user=request.user)
+                geom = prop.parcel_boundary or prop.geom
+                props = dict(props, status=prop.last_status, height_m=prop.height_m)
+            if geom is None:
+                return JsonResponse({'error': 'No geometry provided'}, status=400)
+            layer = UserLayer.objects.create(
+                user=request.user, name=name, layer_type=layer_type,
+                geometry=geom, properties=props,
+            )
+            return JsonResponse({'id': layer.pk, 'name': layer.name, 'status': 'created'})
+        except (KeyError, ValueError, TypeError) as e:
+            return JsonResponse({'error': str(e)}, status=400)
+
+
+class UserLayerDeleteView(LoginRequiredMixin, View):
+    """Delete one of the current user's layers."""
+
+    def post(self, request, pk):
+        layer = get_object_or_404(UserLayer, pk=pk, user=request.user)
+        layer.delete()
+        return JsonResponse({'status': 'deleted'})
+
+
+# ============================================
 # PUBLIC PROPERTY QUERY TOOL
 # ============================================
 
@@ -1893,9 +2167,32 @@ class ApplicationSubmitView(View):
         app = get_object_or_404(ComplianceApplication, pk=pk, user=request.user)
         try:
             ApplicationWorkflow.transition(app, 'submitted')
-            messages.success(request, f'Application #{app.pk} submitted for review.')
         except ValueError as e:
             messages.error(request, str(e))
+            return redirect('obstacle_compliance:application_detail', pk=pk)
+
+        # Automatic OLS re-check at submission time (ADR + AC AGA005B):
+        # stamp the verdict snapshot on the application and alert on breach.
+        try:
+            from .utils import recheck_application_ols
+            changed, check = recheck_application_ols(app)
+            if check is not None:
+                breach = check.status == 'RED' or check.is_hazard
+                Notification.objects.create(
+                    user=request.user,
+                    notification_type='application_update',
+                    title='Application submitted — OLS verdict',
+                    message=(
+                        f"App #{app.pk}: property is {check.status} "
+                        f"(headroom {app.last_headroom_m} m, ceiling {app.last_ceiling_amsl} m)."
+                        + (" This structure may breach the obstacle limitation surfaces — please review the "
+                           "compliance report before proceeding." if breach else " No breach detected.")
+                    ),
+                    link=reverse('obstacle_compliance:application_detail', args=[app.pk]),
+                )
+        except Exception:
+            logger.exception(f"Auto-check failed for application {app.pk}")
+        messages.success(request, f'Application #{app.pk} submitted for review.')
         return redirect('obstacle_compliance:application_detail', pk=pk)
 
 
@@ -2091,6 +2388,15 @@ class AdminApplicationActionView(View):
                 send_notification_email(Notification.objects.filter(user=app.user).latest('created_at'))
             except Exception:
                 pass
+
+            # Admin re-check: refresh the OLS verdict and alert the owner on change
+            try:
+                from .utils import recheck_application_ols
+                changed, check = recheck_application_ols(app, actor=request.user)
+                if changed:
+                    messages.info(request, f'OLS verdict changed for this application (now {app.last_status}).')
+            except Exception:
+                logger.exception(f"Admin re-check failed for application {app.pk}")
 
             messages.success(request, f'Application #{app.pk} {approved and "approved" or "rejected"}.')
         except ValueError as e:
