@@ -300,6 +300,20 @@ class AerodromeRunway(models.Model):
     length_difference_pct = models.CharField(max_length=30, null=True, blank=True)
     remarks = models.CharField(max_length=300, null=True, blank=True)
 
+    APPROACH_CATEGORY_CHOICES = [
+        ('non_instrument', 'Non-instrument (visual)'),
+        ('non_precision', 'Non-precision'),
+        ('precision_i', 'Precision CAT I'),
+        ('precision_ii_iii', 'Precision CAT II/III'),
+    ]
+    approach_category = models.CharField(
+        max_length=20,
+        choices=APPROACH_CATEGORY_CHOICES,
+        null=True,
+        blank=True,
+        help_text="Runway use category - determines the OLS approach/OFZ surfaces (Annex 14 Table 4-1).",
+    )
+
     class Meta:
         managed = False
         db_table = 'aerodrome-runways'
