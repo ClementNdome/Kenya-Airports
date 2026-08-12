@@ -195,6 +195,59 @@ class Aerodrome(models.Model):
             logging.getLogger(__name__).debug(f"Buffer {radius_km}km already existed for {self.icao_code}")
 
         return buf
+
+    def runway_capsule(self, radius_km):
+        """Stadium-shaped buffer around the runway centreline(s) - the
+        runway-threshold buffer (HKNL 03/21: 3/5/10 km around thresholds).
+
+        Returns a WGS84 GEOS geometry (capsule around the union of runway
+        lines) or None when this aerodrome has no runway geometry.
+        """
+        try:
+            from .models import AerodromeRunway
+            lines = [r.geom for r in AerodromeRunway.objects.filter(icao_code=self.icao_code) if r.geom]
+            if not lines:
+                return None
+            radius_m = float(radius_km) * 1000.0
+            caps = None
+            for ln in lines:
+                b = ln.transform(3857, clone=True).buffer(radius_m)
+                caps = b if caps is None else caps.union(b)
+            return caps.transform(4326, clone=True)
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                f"runway_capsule failed for {self.icao_code}: {exc}")
+            return None
+
+    def get_or_create_runway_threshold_buffer(self, radius_km):
+        """Create/replace the ARP-circle buffer with the runway capsule for
+        this radius (3/5/10 km per HKNL 03/21). Returns the buffer or None."""
+        caps = self.runway_capsule(radius_km)
+        if caps is None:
+            return None
+        radius_km = int(radius_km)
+        geom_4326 = caps
+        if geom_4326.geom_type == 'Polygon':
+            from django.contrib.gis.geos import MultiPolygon
+            geom_4326 = MultiPolygon(geom_4326)
+        geom_3857 = caps.transform(3857, clone=True)
+        area_km2 = round(geom_3857.area / 1_000_000, 2)
+        defaults = {
+            'type': 'runway_threshold',
+            'latitude_decimal': self.geom.y if self.geom else None,
+            'longitude_decimal': self.geom.x if self.geom else None,
+            'layer': f"{radius_km}km_runway_threshold",
+            'geom': geom_4326,
+            'area_km2': area_km2,
+        }
+        buf, _ = AerodromeBuffer.objects.update_or_create(
+            aerodrome=self,
+            radius_km=radius_km,
+            defaults=defaults,
+        )
+        logging.getLogger(__name__).info(
+            f"🛫 Runway-threshold buffer {radius_km}km for {self.icao_code} (area: {area_km2} km²)")
+        return buf
     
 # new model for buffers - can be linked to Aerodrome via FK
 class AerodromeBuffer(models.Model):
@@ -572,6 +625,13 @@ class ComplianceApplication(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # OLS verdict snapshot computed automatically at submission time
+    last_status = models.CharField(max_length=20, choices=STATUS_CHOICES, blank=True, default='')
+    last_score = models.FloatField(null=True, blank=True)
+    last_ceiling_amsl = models.FloatField(null=True, blank=True)
+    last_headroom_m = models.FloatField(null=True, blank=True)
+    last_checked = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         ordering = ['-created_at']
         indexes = [
@@ -581,6 +641,32 @@ class ComplianceApplication(models.Model):
 
     def __str__(self):
         return f"App #{self.pk} — {self.property.name} ({self.get_status_display()})"
+
+
+class UserLayer(models.Model):
+    """A user-saved, named, toggleable layer (ADR: persistent layers)."""
+    LAYER_TYPES = [
+        ('buffer', 'Buffer'),
+        ('check_result', 'Compliance check result'),
+        ('parcel', 'Property parcel'),
+        ('custom', 'Custom'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='layers')
+    name = models.CharField(max_length=255)
+    layer_type = models.CharField(max_length=20, choices=LAYER_TYPES, default='custom')
+    geometry = models.GeometryField(srid=4326, null=True, blank=True)
+    properties = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'layer_type']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.user.username})"
 
 
 class BulkUploadJob(models.Model):

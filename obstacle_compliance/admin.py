@@ -3,7 +3,7 @@ from django.contrib import admin
 from leaflet.admin import LeafletGeoAdmin
 
 
-from .models import Aerodrome, AerodromeBuffer, UserProfile, Property, ComplianceCheck, Notification, ComplianceApplication, BulkUploadJob, AerodromeRunway, DeclaredDistance
+from .models import Aerodrome, AerodromeBuffer, UserProfile, Property, ComplianceCheck, Notification, ComplianceApplication, BulkUploadJob, AerodromeRunway, DeclaredDistance, UserLayer
 
 
 class Aerodromes(LeafletGeoAdmin):
@@ -58,9 +58,31 @@ class NotificationAdmin(admin.ModelAdmin):
 
 @admin.register(ComplianceApplication)
 class ComplianceApplicationAdmin(admin.ModelAdmin):
-    list_display = ('pk', 'property', 'user', 'status', 'submitted_at', 'certificate_number')
-    list_filter = ('status', 'created_at')
+    list_display = ('pk', 'property', 'user', 'status', 'last_status', 'last_score', 'submitted_at', 'certificate_number')
+    list_filter = ('status', 'last_status', 'created_at')
     search_fields = ('user__username', 'property__name', 'certificate_number')
+
+    def save_model(self, request, obj, form, change):
+        was = (obj.last_status, obj.last_score) if change else None
+        super().save_model(request, obj, form, change)
+        if change:
+            try:
+                from .utils import recheck_application_ols
+                changed, check = recheck_application_ols(obj, actor=request.user)
+                if changed:
+                    self.message_user(request,
+                        f'Re-checked OLS for app #{obj.pk}: verdict now {obj.last_status} '
+                        f'(score {obj.last_score}). Owner notified.', level='SUCCESS')
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception(f"Admin re-check failed for application {obj.pk}")
+
+
+@admin.register(UserLayer)
+class UserLayerAdmin(LeafletGeoAdmin):
+    list_display = ('name', 'user', 'layer_type', 'created_at')
+    list_filter = ('layer_type',)
+    search_fields = ('name', 'user__username')
 
 
 @admin.register(BulkUploadJob)
