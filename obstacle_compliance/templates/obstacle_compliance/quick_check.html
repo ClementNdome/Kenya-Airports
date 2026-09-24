@@ -72,8 +72,10 @@
 {% block extra_js %}
 <link rel="stylesheet" href="{% static 'css/geocode-widget.css' %}">
 <script src="{% static 'js/geocode-widget.js' %}"></script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script>
+var quickBasemapDefs = {{ basemaps|safe }};
+var quickDefaultId = "{{ default_basemap_id|default:'mapbox-light' }}";
+</script>
 <script>
 let resultMap;
 
@@ -135,7 +137,15 @@ document.getElementById('quickCheckForm').addEventListener('submit', function(e)
 
     if (resultMap) resultMap.remove();
     resultMap = L.map('mapPreview').setView([data.latitude, data.longitude], 13);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(resultMap);
+    (function(){
+        var def = quickBasemapDefs.find(function(b){return b.id===quickDefaultId;}) || quickBasemapDefs[0];
+        if (def) {
+            var isMb = def.url.indexOf('api.mapbox.com') !== -1;
+            L.tileLayer(def.url, {attribution:def.attribution, tileSize:isMb?512:256, zoomOffset:isMb?-1:0, maxZoom:18}).addTo(resultMap);
+        } else {
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{attribution:'Tiles &copy; Esri'}).addTo(resultMap);
+        }
+    })();
     L.marker([data.latitude, data.longitude]).addTo(resultMap)
       .bindPopup(`<b>${data.latitude}, ${data.longitude}</b><br>Height: ${data.height}m`);
     setTimeout(() => resultMap.invalidateSize(), 200);

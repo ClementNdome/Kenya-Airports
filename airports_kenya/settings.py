@@ -185,7 +185,72 @@ SITE_URL = config('SITE_URL', default='http://127.0.0.1:8000')
 # Password reset
 PASSWORD_RESET_TIMEOUT = 86400  # 24 hours
 
-# Leaflet configuration
+# Leaflet / Basemap configuration — Mapbox default + ESRI fallbacks (no Carto)
+# Carto removed: anon cartocdn now returns "API KEY REQUIRED" (carto.com/basemaps/apikey).
+# Default is Mapbox Light (pk token) with fallbacks to ESRI/OpenTopo/OSM when token missing or 401.
+TILE_PROVIDER = config("TILE_PROVIDER", default="mapbox-light").lower()  # mapbox-light|mapbox-streets|mapbox-dark|mapbox-satellite|mapbox-outdoors|esri-street|esri-imagery|opentopomap|osm
+MAPBOX_TOKEN_FOR_TILES = config("MAPBOX_PUBLIC_ACCESS_TOKEN", default="").strip()
+
+_TILE_PROVIDERS = []
+if MAPBOX_TOKEN_FOR_TILES:
+    # tileSize 512 + zoomOffset -1 gives crisp 2x retina tiles for Leaflet
+    _TILE_PROVIDERS += [
+        (
+            "Mapbox Light",
+            f"https://api.mapbox.com/styles/v1/mapbox/light-v11/tiles/{{z}}/{{x}}/{{y}}?access_token={MAPBOX_TOKEN_FOR_TILES}",
+            '&copy; <a href="https://www.mapbox.com/about/maps/">Mapbox</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        ),
+        (
+            "Mapbox Streets",
+            f"https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{{z}}/{{x}}/{{y}}?access_token={MAPBOX_TOKEN_FOR_TILES}",
+            '&copy; <a href="https://www.mapbox.com/about/maps/">Mapbox</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        ),
+        (
+            "Mapbox Dark",
+            f"https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/{{z}}/{{x}}/{{y}}?access_token={MAPBOX_TOKEN_FOR_TILES}",
+            '&copy; <a href="https://www.mapbox.com/about/maps/">Mapbox</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        ),
+        (
+            "Mapbox Satellite Streets",
+            f"https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/{{z}}/{{x}}/{{y}}?access_token={MAPBOX_TOKEN_FOR_TILES}",
+            '&copy; <a href="https://www.mapbox.com/about/maps/">Mapbox</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://www.maxar.com/">Maxar</a>',
+        ),
+        (
+            "Mapbox Outdoors",
+            f"https://api.mapbox.com/styles/v1/mapbox/outdoors-v12/tiles/{{z}}/{{x}}/{{y}}?access_token={MAPBOX_TOKEN_FOR_TILES}",
+            '&copy; <a href="https://www.mapbox.com/about/maps/">Mapbox</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        ),
+    ]
+
+# ESRI + OpenTopo + OSM fallbacks — free, no key, used when Mapbox token absent or 401
+_TILE_PROVIDERS += [
+    (
+        "ESRI Street",
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+        "Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom, 2012",
+    ),
+    (
+        "ESRI Imagery",
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
+    ),
+    (
+        "ESRI Topo",
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+        "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, TomTom, Intermap, iPC, USGS, FAO, NPS, NRCAN, GeoBase, Kadaster NL, Ordnance Survey, Esri Japan, METI, Esri China (Hong Kong), and the GIS User Community",
+    ),
+    (
+        "OpenTopoMap",
+        "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+        '&copy; <a href="https://opentopomap.org">OpenTopoMap</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, SRTM',
+    ),
+    (
+        "OSM (fallback)",
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    ),
+]
+
 LEAFLET_CONFIG = {
     "DEFAULT_CENTER": (-0.0236, 37.9062),  # Center of Kenya
     "DEFAULT_ZOOM": 6,
@@ -193,6 +258,7 @@ LEAFLET_CONFIG = {
     "MAX_ZOOM": 18,
     "SCALE": "both",
     "ATTRIBUTION_PREFIX": "Kenya Airports GIS",
+    "TILES": _TILE_PROVIDERS,
 }
 
 STATIC_ROOT = BASE_DIR / "staticfiles"

@@ -387,12 +387,32 @@
             document.getElementById('addressSearch').value = pA;
         }
         
-        // Initialize map
+        // Initialize map — Mapbox Light default + ESRI fallbacks (no anon Carto)
+        var basemapDefs = {{ basemaps|safe }};
+        var defaultId = "{{ default_basemap_id|default:'mapbox-light' }}";
+        var basemapsById = {};
+        basemapDefs.forEach(function(b){
+            var isMb = b.url.indexOf('api.mapbox.com') !== -1;
+            basemapsById[b.id] = L.tileLayer(b.url, {attribution:b.attribution, tileSize:isMb?512:256, zoomOffset:isMb?-1:0, maxZoom:18});
+        });
         map = L.map('propertyMap').setView([-1.2864, 36.8172], 13);
-        
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        }).addTo(map);
+        var _init = basemapsById[defaultId] || basemapsById[basemapDefs[0].id];
+        if (_init) _init.addTo(map);
+        // Basemap switcher + tileerror fallback
+        if (Object.keys(basemapsById).length > 1) L.control.layers(basemapsById, null, {position:'topright', collapsed:true}).addTo(map);
+        (function(){
+            var order = basemapDefs.map(function(b){return b.id;});
+            var tried=false;
+            Object.keys(basemapsById).forEach(function(id){
+                basemapsById[id].on('tileerror', function(){
+                    if(tried || !map.hasLayer(basemapsById[id]) || id.indexOf('osm')!==-1) return;
+                    var idx=order.indexOf(id), nid=idx>=0&&idx+1<order.length?order[idx+1]:null;
+                    while(nid && !basemapsById[nid] && order.indexOf(nid)+1<order.length) nid=order[order.indexOf(nid)+1];
+                    var fb=nid?basemapsById[nid]:basemapsById[order[order.length-1]];
+                    if(fb && !map.hasLayer(fb)){tried=true; Object.values(basemapsById).forEach(function(l){if(map.hasLayer(l)) map.removeLayer(l);}); fb.addTo(map); console.warn('[basemap] '+id+' tile error — switched to '+nid);}
+                });
+            });
+        })();
         map.addLayer(oxyLayers);
         
         // Add click handler to map

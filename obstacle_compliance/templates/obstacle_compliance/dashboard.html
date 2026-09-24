@@ -100,7 +100,7 @@
                                 </button>
                             </div>
 
-                            <!-- Basemap switcher dropdown -->
+                            <!-- Basemap switcher dropdown — dynamic from view (Mapbox + ESRI fallbacks, no Carto) -->
                             <div class="dropdown">
                                 <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" id="basemapDropdown" data-bs-toggle="dropdown" aria-expanded="false">
                                     <i class="fas fa-layer-group me-1"></i>
@@ -108,11 +108,9 @@
                                 </button>
                                 <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="basemapDropdown" id="basemapList">
                                     <li><h6 class="dropdown-header">Select Basemap</h6></li>
-                                    <li><a class="dropdown-item active" href="#" data-basemap="carto-light">Carto Light</a></li>
-                                    <li><a class="dropdown-item" href="#" data-basemap="osm">OpenStreetMap</a></li>
-                                    <li><a class="dropdown-item" href="#" data-basemap="satellite">Satellite</a></li>
-                                    <li><a class="dropdown-item" href="#" data-basemap="terrain">Terrain</a></li>
-                                    <li><a class="dropdown-item" href="#" data-basemap="carto-dark">Carto Dark</a></li>
+                                    {% for bm in basemaps %}
+                                    <li><a class="dropdown-item {% if bm.id == default_basemap_id %}active{% endif %}" href="#" data-basemap="{{ bm.id }}">{{ bm.name }}</a></li>
+                                    {% endfor %}
                                 </ul>
                             </div>
                             
@@ -311,27 +309,45 @@
             }, 100);
         });
         
-        // Define basemaps
-        var basemaps = {
-            'carto-light': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; CartoDB'
-            }),
-            'osm': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            }),
-            'satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: '&copy; <a href="https://www.esri.com/">Esri</a>'
-            }),
-            'terrain': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://opentopomap.org/">OpenTopoMap</a>'
-            }),
-            'carto-dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; CartoDB'
-            })
-        };
-        
-        // Add default basemap
-        basemaps['carto-light'].addTo(map);
+        // Define basemaps — from server (Mapbox + ESRI fallbacks, no anon Carto)
+        var basemapDefs = {{ basemaps|safe }};
+        var defaultBasemapId = "{{ default_basemap_id|default:'mapbox-light' }}";
+        var basemaps = {};
+        basemapDefs.forEach(function(bm) {
+            var isMapbox = bm.url.indexOf('api.mapbox.com') !== -1;
+            basemaps[bm.id] = L.tileLayer(bm.url, {
+                attribution: bm.attribution,
+                tileSize: isMapbox ? 512 : 256,
+                zoomOffset: isMapbox ? -1 : 0,
+                maxZoom: 18
+            });
+        });
+        // tileerror -> auto-fallback down the list (handles revoked Mapbox token without blank map)
+        (function() {
+            var order = basemapDefs.map(function(b){ return b.id; });
+            var tried = false;
+            Object.keys(basemaps).forEach(function(id) {
+                basemaps[id].on('tileerror', function() {
+                    if (tried || !map.hasLayer(basemaps[id])) return;
+                    var idx = order.indexOf(id);
+                    var nextId = idx >=0 && idx+1 < order.length ? order[idx+1] : null;
+                    while (nextId && !basemaps[nextId] && order.indexOf(nextId)+1 < order.length) nextId = order[order.indexOf(nextId)+1];
+                    var fb = nextId ? basemaps[nextId] : basemaps[order[order.length-1]];
+                    if (fb && !map.hasLayer(fb)) {
+                        tried = true;
+                        Object.values(basemaps).forEach(function(l){ if(map.hasLayer(l)) map.removeLayer(l); });
+                        fb.addTo(map);
+                        document.querySelectorAll('[data-basemap]').forEach(function(el){ el.classList.toggle('active', el.dataset.basemap===nextId); });
+                        console.warn('[basemap] '+id+' tile error — switched to '+nextId);
+                    }
+                });
+            });
+        })();
+
+        // Add default basemap (Mapbox Light or first ESRI if no token)
+        var initialId = basemaps[defaultBasemapId] ? defaultBasemapId : (basemapDefs[0] && basemapDefs[0].id.replace(' ', '-').toLowerCase());
+        if (basemaps[initialId]) basemaps[initialId].addTo(map);
+        else if (basemapDefs.length) basemaps[basemapDefs[0].id] && basemaps[basemapDefs[0].id].addTo(map);
         
         // Layer groups
         var airportLayer = L.layerGroup().addTo(map);

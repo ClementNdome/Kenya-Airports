@@ -83,45 +83,49 @@ class ObstacleComplianceDashboard(TemplateView):
             'default_radius': 10,
         }
         
-        # Available basemap options
+        # Available basemap options — derived from settings.LEAFLET_CONFIG (Mapbox + ESRI fallbacks, no anon Carto)
+        # Carto removed: anon cartocdn returns "API KEY REQUIRED" (carto.com/basemaps/apikey)
+        def _thumb_for(name):
+            n = name.lower()
+            if 'mapbox' in n and 'satellite' in n:
+                return '/static/obstacle_compliance/images/basemaps/satellite.jpg'
+            if 'mapbox' in n and 'dark' in n:
+                return '/static/obstacle_compliance/images/basemaps/carto-dark.jpg'
+            if 'mapbox' in n:
+                return '/static/obstacle_compliance/images/basemaps/carto-light.jpg'
+            if 'esri street' in n:
+                return 'https://www.esri.com/content/dam/esrisites/en-us/home/imagery/imagery-world-imagery.jpg'
+            if 'esri imagery' in n or 'satellite' in n:
+                return '/static/obstacle_compliance/images/basemaps/satellite.jpg'
+            if 'opentopo' in n or 'outdoors' in n or 'terrain' in n:
+                return '/static/obstacle_compliance/images/basemaps/terrain.jpg'
+            if 'osm' in n:
+                return '/static/obstacle_compliance/images/basemaps/osm.jpg'
+            return ''
+
+        tiles = getattr(settings, 'LEAFLET_CONFIG', {}).get('TILES', [])
         context['basemaps'] = [
             {
-                'id': 'osm',
-                'name': 'OpenStreetMap',
-                'url': 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                'attribution': '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-                'thumbnail': 'https://a.tile.openstreetmap.org/0/0/0.png'
-            },
-            {
-                'id': 'satellite',
-                'name': 'Satellite',
-                'url': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                'attribution': '&copy; <a href="https://www.esri.com/">Esri</a>',
-                'thumbnail': 'https://www.esri.com/content/dam/esrisites/en-us/home/imagery/imagery-world-imagery.jpg'
-            },
-            {
-                'id': 'terrain',
-                'name': 'Terrain',
-                'url': 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-                'attribution': '&copy; <a href="https://opentopomap.org/">OpenTopoMap</a>',
-                'thumbnail': 'https://opentopomap.org/resources/img/logo.png'
-            },
-            {
-                'id': 'carto-light',
-                'name': 'Carto Light',
-                'url': 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-                'attribution': '&copy; <a href="https://www.carto.com/">CartoDB</a>',
-                'thumbnail': 'https://carto.com/favicon.ico'
-            },
-            {
-                'id': 'carto-dark',
-                'name': 'Carto Dark',
-                'url': 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                'attribution': '&copy; <a href="https://www.carto.com/">CartoDB</a>',
-                'thumbnail': 'https://carto.com/favicon.ico'
+                'id': name.lower().replace(' ', '-').replace('(', '').replace(')', '').replace('/', '-'),
+                'name': name,
+                'url': url,
+                'attribution': attr,
+                'thumbnail': _thumb_for(name),
             }
+            for name, url, attr in tiles
         ]
-        
+        # Default matches TILE_PROVIDER (mapbox-light) or first Mapbox entry
+        provider = getattr(settings, 'TILE_PROVIDER', 'mapbox-light').lower()
+        default_id = None
+        for b in context['basemaps']:
+            if provider.replace('-', '') in b['id'].replace('-', '') or provider in b['name'].lower():
+                default_id = b['id']
+                break
+        if not default_id and context['basemaps']:
+            default_id = context['basemaps'][0]['id']
+        context['default_basemap_id'] = default_id
+        context['mapbox_token'] = getattr(settings, 'MAPBOX_PUBLIC_ACCESS_TOKEN', '')
+
         return context
 
 class AirportListView(ListView):
@@ -197,9 +201,31 @@ class AirportDetailView(DetailView):
         
         # Airport statistics
         context.update(self._get_airport_stats(airport))
-        
+
+        # Basemap config — Mapbox + ESRI fallbacks (no anon Carto)
+        tiles = getattr(settings, 'LEAFLET_CONFIG', {}).get('TILES', [])
+        context['basemaps'] = [
+            {
+                'id': name.lower().replace(' ', '-').replace('(', '').replace(')', '').replace('/', '-'),
+                'name': name,
+                'url': url,
+                'attribution': attr,
+            }
+            for name, url, attr in tiles
+        ]
+        provider = getattr(settings, 'TILE_PROVIDER', 'mapbox-light').lower()
+        default_id = None
+        for b in context['basemaps']:
+            if provider.replace('-', '') in b['id'].replace('-', '') or provider in b['name'].lower():
+                default_id = b['id']
+                break
+        if not default_id and context['basemaps']:
+            default_id = context['basemaps'][0]['id']
+        context['default_basemap_id'] = default_id
+        context['mapbox_token'] = getattr(settings, 'MAPBOX_PUBLIC_ACCESS_TOKEN', '')
+
         return context
-    
+
     def _get_airport_stats(self, airport):
         """Calculate statistics for the airport"""
         # Get all properties in buffer (placeholder - will be implemented with property model later)
@@ -246,7 +272,7 @@ class PropertyComplianceView(LoginRequiredMixin, TemplateView):
     View for checking property compliance
     """
     template_name = 'obstacle_compliance/property_check.html'
-    
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['default_height'] = 30
@@ -255,6 +281,26 @@ class PropertyComplianceView(LoginRequiredMixin, TemplateView):
             'center': [-1.2864, 36.8172],
             'zoom': 12,
         }
+        # Basemaps — Mapbox + ESRI fallbacks (no anon Carto)
+        tiles = getattr(settings, 'LEAFLET_CONFIG', {}).get('TILES', [])
+        context['basemaps'] = [
+            {
+                'id': name.lower().replace(' ', '-').replace('(', '').replace(')', '').replace('/', '-'),
+                'name': name,
+                'url': url,
+                'attribution': attr,
+            }
+            for name, url, attr in tiles
+        ]
+        provider = getattr(settings, 'TILE_PROVIDER', 'mapbox-light').lower()
+        default_id = None
+        for b in context['basemaps']:
+            if provider.replace('-', '') in b['id'].replace('-', '') or provider in b['name'].lower():
+                default_id = b['id']
+                break
+        if not default_id and context['basemaps']:
+            default_id = context['basemaps'][0]['id']
+        context['default_basemap_id'] = default_id
         return context
 
 
@@ -678,38 +724,46 @@ class MapView(TemplateView):
             '15km': AerodromeBuffer.objects.filter(radius_km=15).count(),
         }
         
-        # Available basemaps
+        # Available basemaps — derived from settings.LEAFLET_CONFIG (Mapbox + ESRI fallbacks, no anon Carto)
+        def _thumb_for(name):
+            n = name.lower()
+            if 'mapbox' in n and 'satellite' in n:
+                return '/static/obstacle_compliance/images/basemaps/satellite.jpg'
+            if 'mapbox' in n and 'dark' in n:
+                return '/static/obstacle_compliance/images/basemaps/carto-dark.jpg'
+            if 'mapbox' in n:
+                return '/static/obstacle_compliance/images/basemaps/carto-light.jpg'
+            if 'esri street' in n:
+                return 'https://www.esri.com/content/dam/esrisites/en-us/home/imagery/imagery-world-imagery.jpg'
+            if 'esri imagery' in n or 'satellite' in n:
+                return '/static/obstacle_compliance/images/basemaps/satellite.jpg'
+            if 'opentopo' in n or 'outdoors' in n or 'terrain' in n:
+                return '/static/obstacle_compliance/images/basemaps/terrain.jpg'
+            if 'osm' in n:
+                return '/static/obstacle_compliance/images/basemaps/osm.jpg'
+            return ''
+
+        tiles = getattr(settings, 'LEAFLET_CONFIG', {}).get('TILES', [])
         context['basemaps'] = [
             {
-                'id': 'carto-light',
-                'name': 'Carto Light',
-                'url': 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-                'attribution': '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; CartoDB',
-                'thumbnail': '/static/obstacle_compliance/images/basemaps/carto-light.jpg'
-            },
-            {
-                'id': 'satellite',
-                'name': 'Satellite',
-                'url': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                'attribution': '&copy; <a href="https://www.esri.com/">Esri</a>',
-                'thumbnail': '/static/obstacle_compliance/images/basemaps/satellite.jpg'
-            },
-            {
-                'id': 'terrain',
-                'name': 'Terrain',
-                'url': 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-                'attribution': '&copy; <a href="https://opentopomap.org/">OpenTopoMap</a>',
-                'thumbnail': '/static/obstacle_compliance/images/basemaps/terrain.jpg'
-            },
-            {
-                'id': 'osm',
-                'name': 'OpenStreetMap',
-                'url': 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                'attribution': '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-                'thumbnail': '/static/obstacle_compliance/images/basemaps/osm.jpg'
+                'id': name.lower().replace(' ', '-').replace('(', '').replace(')', '').replace('/', '-'),
+                'name': name,
+                'url': url,
+                'attribution': attr,
+                'thumbnail': _thumb_for(name),
             }
+            for name, url, attr in tiles
         ]
-        
+        provider = getattr(settings, 'TILE_PROVIDER', 'mapbox-light').lower()
+        default_id = None
+        for b in context['basemaps']:
+            if provider.replace('-', '') in b['id'].replace('-', '') or provider in b['name'].lower():
+                default_id = b['id']
+                break
+        if not default_id and context['basemaps']:
+            default_id = context['basemaps'][0]['id']
+        context['default_basemap_id'] = default_id
+
         return context
 
 
@@ -1906,6 +1960,27 @@ class PropertyQueryPageView(TemplateView):
         ).exclude(icao_code='').order_by('icao_code')[:200]
         ctx['status_choices'] = ['GREEN', 'YELLOW', 'RED']
         ctx['total_properties'] = Property.objects.filter(is_active=True).count()
+        # Basemaps — Mapbox + ESRI fallbacks (no anon Carto)
+        tiles = getattr(settings, 'LEAFLET_CONFIG', {}).get('TILES', [])
+        ctx['basemaps'] = [
+            {
+                'id': name.lower().replace(' ', '-').replace('(', '').replace(')', '').replace('/', '-'),
+                'name': name,
+                'url': url,
+                'attribution': attr,
+            }
+            for name, url, attr in tiles
+        ]
+        provider = getattr(settings, 'TILE_PROVIDER', 'mapbox-light').lower()
+        default_id = None
+        for b in ctx['basemaps']:
+            if provider.replace('-', '') in b['id'].replace('-', '') or provider in b['name'].lower():
+                default_id = b['id']
+                break
+        if not default_id and ctx['basemaps']:
+            default_id = ctx['basemaps'][0]['id']
+        ctx['default_basemap_id'] = default_id
+        ctx['mapbox_token'] = getattr(settings, 'MAPBOX_PUBLIC_ACCESS_TOKEN', '')
         return ctx
 
 
@@ -2474,6 +2549,30 @@ class AdminApplicationActionView(View):
 
 class QuickCheckView(TemplateView):
     template_name = 'obstacle_compliance/quick_check.html'
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        tiles = getattr(settings, 'LEAFLET_CONFIG', {}).get('TILES', [])
+        ctx['basemaps'] = [
+            {
+                'id': name.lower().replace(' ', '-').replace('(', '').replace(')', '').replace('/', '-'),
+                'name': name,
+                'url': url,
+                'attribution': attr,
+            }
+            for name, url, attr in tiles
+        ]
+        provider = getattr(settings, 'TILE_PROVIDER', 'mapbox-light').lower()
+        default_id = None
+        for b in ctx['basemaps']:
+            if provider.replace('-', '') in b['id'].replace('-', '') or provider in b['name'].lower():
+                default_id = b['id']
+                break
+        if not default_id and ctx['basemaps']:
+            default_id = ctx['basemaps'][0]['id']
+        ctx['default_basemap_id'] = default_id
+        ctx['mapbox_token'] = getattr(settings, 'MAPBOX_PUBLIC_ACCESS_TOKEN', '')
+        return ctx
 
 
 class QuickCheckAPI(View):

@@ -438,24 +438,21 @@
         </div>
     </div>
     
-    <!-- Basemap Switcher (inside map) -->
+    <!-- Basemap Switcher (inside map) — dynamic Mapbox + ESRI fallbacks -->
     <div class="basemap-switcher">
         <button class="basemap-toggle" id="basemapToggle">
             <i class="fas fa-layer-group"></i>
         </button>
         <div class="basemap-menu" id="basemapMenu">
-            <div class="basemap-item active" data-basemap="carto-light">
-                <i class="fas fa-map"></i> Carto Light
+            {% for bm in basemaps %}
+            <div class="basemap-item {% if bm.id == default_basemap_id %}active{% endif %}" data-basemap="{{ bm.id }}">
+                {% if 'satellite' in bm.id %}<i class="fas fa-satellite"></i>
+                {% elif 'dark' in bm.id %}<i class="fas fa-moon"></i>
+                {% elif 'terrain' in bm.id or 'outdoors' in bm.id or 'opentopo' in bm.id %}<i class="fas fa-mountain"></i>
+                {% else %}<i class="fas fa-map"></i>
+                {% endif %} {{ bm.name }}
             </div>
-            <div class="basemap-item" data-basemap="satellite">
-                <i class="fas fa-satellite"></i> Satellite
-            </div>
-            <div class="basemap-item" data-basemap="terrain">
-                <i class="fas fa-mountain"></i> Terrain
-            </div>
-            <div class="basemap-item" data-basemap="osm">
-                <i class="fas fa-globe"></i> OpenStreetMap
-            </div>
+            {% endfor %}
         </div>
     </div>
     
@@ -604,24 +601,45 @@
         // Position zoom control for mobile
         map.zoomControl.setPosition('topright');
         
-        // Define basemaps
-        var basemaps = {
-            'carto-light': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; CartoDB'
-            }),
-            'satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: '&copy; <a href="https://www.esri.com/">Esri</a>'
-            }),
-            'terrain': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://opentopomap.org/">OpenTopoMap</a>'
-            }),
-            'osm': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            })
-        };
-        
-        // Add default basemap
-        basemaps['osm'].addTo(map);
+        // Define basemaps — from server (Mapbox + ESRI fallbacks, no anon Carto)
+        var basemapDefs = {{ basemaps|safe }};
+        var defaultBasemapId = "{{ default_basemap_id|default:'mapbox-light' }}";
+        var basemaps = {};
+        basemapDefs.forEach(function(bm) {
+            var isMapbox = bm.url.indexOf('api.mapbox.com') !== -1;
+            basemaps[bm.id] = L.tileLayer(bm.url, {
+                attribution: bm.attribution,
+                tileSize: isMapbox ? 512 : 256,
+                zoomOffset: isMapbox ? -1 : 0,
+                maxZoom: 18
+            });
+        });
+        (function() {
+            var order = basemapDefs.map(function(b){ return b.id; });
+            var tried = false;
+            Object.keys(basemaps).forEach(function(id) {
+                basemaps[id].on('tileerror', function() {
+                    if (tried || !map.hasLayer(basemaps[id])) return;
+                    if (id.indexOf('osm') !== -1) return;
+                    var idx = order.indexOf(id);
+                    var nextId = idx >=0 && idx+1 < order.length ? order[idx+1] : null;
+                    while (nextId && !basemaps[nextId] && order.indexOf(nextId)+1 < order.length) nextId = order[order.indexOf(nextId)+1];
+                    var fb = nextId ? basemaps[nextId] : basemaps[order[order.length-1]];
+                    if (fb && !map.hasLayer(fb)) {
+                        tried = true;
+                        Object.values(basemaps).forEach(function(l){ if(map.hasLayer(l)) map.removeLayer(l); });
+                        fb.addTo(map);
+                        document.querySelectorAll('.basemap-item').forEach(function(el){ el.classList.toggle('active', el.dataset.basemap===nextId); });
+                        console.warn('[basemap] '+id+' tile error — switched to '+nextId);
+                    }
+                });
+            });
+        })();
+
+        // Add default basemap (Mapbox Light or ESRI Street if no token)
+        var initialId = basemaps[defaultBasemapId] ? defaultBasemapId : (basemapDefs[0] && basemapDefs[0].id);
+        if (basemaps[initialId]) basemaps[initialId].addTo(map);
+        else if (basemapDefs.length) basemaps[basemapDefs[0].id].addTo(map);
         
         // Layer groups
         var airportLayer = L.layerGroup().addTo(map);

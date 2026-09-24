@@ -302,10 +302,29 @@
         const airportLng = {{ airport.geom.x }};
         
         map = L.map('airportDetailMap').setView([airportLat, airportLng], 11);
-        
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        }).addTo(map);
+
+        // Basemap — Mapbox Light default + ESRI fallbacks (no anon Carto)
+        (function() {
+            var defs = {{ basemaps|safe }};
+            var defaultId = "{{ default_basemap_id|default:'mapbox-light' }}";
+            var isMapbox = function(u){ return u.indexOf('api.mapbox.com') !== -1; };
+            var layer = null;
+            for (var i=0;i<defs.length;i++) if (defs[i].id === defaultId) { layer = defs[i]; break; }
+            if (!layer && defs.length) layer = defs[0];
+            if (layer) {
+                L.tileLayer(layer.url, {
+                    attribution: layer.attribution,
+                    tileSize: isMapbox(layer.url) ? 512 : 256,
+                    zoomOffset: isMapbox(layer.url) ? -1 : 0,
+                    maxZoom: 18
+                }).addTo(map);
+            } else {
+                // Ultimate fallback if context missing
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri'
+                }).addTo(map);
+            }
+        })();
         
         // Add airport marker
         L.marker([airportLat, airportLng])

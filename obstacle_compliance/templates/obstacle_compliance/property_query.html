@@ -92,11 +92,34 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
+var queryBasemapDefs = {{ basemaps|safe }};
+var queryDefaultId = "{{ default_basemap_id|default:'mapbox-light' }}";
+</script>
+<script>
 (function () {
+    var _def = queryBasemapDefs.find(function(b){return b.id===queryDefaultId;}) || queryBasemapDefs[0];
+    var _isMb = _def && _def.url.indexOf('api.mapbox.com') !== -1;
     const map = L.map('queryMap').setView([-0.0236, 37.9062], 7);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19, attribution: '&copy; OpenStreetMap'
-    }).addTo(map);
+    if (_def) L.tileLayer(_def.url, {attribution:_def.attribution, tileSize:_isMb?512:256, zoomOffset:_isMb?-1:0, maxZoom:18}).addTo(map);
+    else L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{attribution:'Tiles &copy; Esri'}).addTo(map);
+    // Basemap switcher
+    if (queryBasemapDefs.length>1){
+        var _layers={};
+        queryBasemapDefs.forEach(function(b){ var isM=b.url.indexOf('api.mapbox.com')!==-1; _layers[b.name]=L.tileLayer(b.url,{attribution:b.attribution, tileSize:isM?512:256, zoomOffset:isM?-1:0, maxZoom:18}); });
+        L.control.layers(_layers, null, {position:'topright', collapsed:true}).addTo(map);
+        var _order=queryBasemapDefs.map(function(b){return b.id;});
+        var _tried=false;
+        Object.keys(_layers).forEach(function(n){
+            var id=queryBasemapDefs.find(function(b){return b.name===n;}).id;
+            _layers[n].on('tileerror', function(){
+                if(_tried || !map.hasLayer(_layers[n]) || id.indexOf('osm')!==-1) return;
+                var idx=_order.indexOf(id), nid=idx>=0&&idx+1<_order.length?_order[idx+1]:null;
+                while(nid && !_layers[queryBasemapDefs.find(function(b){return b.id===nid;}).name] && _order.indexOf(nid)+1<_order.length) nid=_order[_order.indexOf(nid)+1];
+                var fb=nid?_layers[queryBasemapDefs.find(function(b){return b.id===nid;}).name]:_layers[queryBasemapDefs[queryBasemapDefs.length-1].name];
+                if(fb && !map.hasLayer(fb)){_tried=true; Object.values(_layers).forEach(function(l){if(map.hasLayer(l)) map.removeLayer(l);}); fb.addTo(map); console.warn('[basemap] '+id+' tile error — switched to '+nid);}
+            });
+        });
+    }
 
     const markers = L.layerGroup().addTo(map);
     const radiusLayer = L.layerGroup().addTo(map);
