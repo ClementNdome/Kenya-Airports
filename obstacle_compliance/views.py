@@ -33,6 +33,7 @@ from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth import views as auth_views
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.core.mail import EmailMessage
@@ -1755,6 +1756,42 @@ class ResendVerificationView(View):
             send_verification_email(request, user)
             return render(request, 'registration/verification_sent.html', {'resend': True})
         return redirect('obstacle_compliance:login')
+
+
+class UnverifiedAwarePasswordResetView(auth_views.PasswordResetView):
+    """PasswordReset that shows a helpful hint when the email belongs to
+    an unverified (inactive) account. Still only emails active users
+    (Django security), but adds a messages.info hint with resend link
+    using the dynamic request host (no locked SITE_URL)."""
+
+    def form_valid(self, form):
+        email = form.cleaned_data.get('email', '').strip().lower()
+        # Check for unverified matching account before the super call sends email
+        unverified_user = None
+        if email:
+            try:
+                from django.contrib.auth.models import User
+                unverified_user = User.objects.filter(email__iexact=email, is_active=False).select_related('profile').first()
+                if unverified_user and not getattr(unverified_user, 'profile', None):
+                    unverified_user = None
+                elif unverified_user and unverified_user.profile.email_verified:
+                    unverified_user = None
+            except Exception:
+                unverified_user = None
+        response = super().form_valid(form)
+        if unverified_user:
+            from django.urls import reverse
+            from django.utils.safestring import mark_safe
+            resend_url = '{}?username={}'.format(
+                reverse('obstacle_compliance:resend_verification'), unverified_user.username
+            )
+            messages.info(
+                self.request,
+                mark_safe(
+                    'That email belongs to an unverified account. Check your inbox for the verification link, or <a href="{}">resend the verification email</a> — then try password reset again after verifying.'.format(resend_url)
+                ),
+            )
+        return response
 
 
 class ProfileView(LoginRequiredMixin, UpdateView):

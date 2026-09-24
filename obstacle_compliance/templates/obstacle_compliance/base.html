@@ -257,12 +257,12 @@
                             <i class="fas fa-building me-1"></i> Property Check
                         </a>
                     </li>
-                    {% if user.is_authenticated %}
                     <li class="nav-item">
                         <a class="nav-link" href="{% url 'obstacle_compliance:user_dashboard' %}">
                             <i class="fas fa-tachometer-alt me-1"></i> Dashboard
                         </a>
                     </li>
+                    {% if user.is_authenticated %}
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                             <i class="fas fa-user me-1"></i> {{ user.username }}
@@ -270,6 +270,9 @@
                         <ul class="dropdown-menu dropdown-menu-end">
                             <li><a class="dropdown-item" href="{% url 'obstacle_compliance:profile' %}">
                                 <i class="fas fa-cog me-2"></i>Profile</a>
+                            </li>
+                            <li><a class="dropdown-item" href="{% url 'obstacle_compliance:password_change' %}">
+                                <i class="fas fa-key me-2"></i>Change Password</a>
                             </li>
                             <li><hr class="dropdown-divider"></li>
                             <li>
@@ -286,11 +289,6 @@
                     <li class="nav-item">
                         <a class="nav-link" href="{% url 'obstacle_compliance:login' %}">
                             <i class="fas fa-sign-in-alt me-1"></i> Login
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'obstacle_compliance:dashboard' %}">
-                            <i class="fas fa-tachometer-alt me-1"></i> Dashboard
                         </a>
                     </li>
                     {% endif %}

@@ -116,8 +116,8 @@ urlpatterns = [
     path('admin-review/<int:pk>/', views.AdminApplicationDetailView.as_view(), name='admin_application_detail'),
     path('admin-review/<int:pk>/<slug:action>/', views.AdminApplicationActionView.as_view(), name='admin_application_action'),
 
-    # ============ PASSWORD RESET ============
-    path('accounts/password-reset/', auth_views.PasswordResetView.as_view(
+    # ============ PASSWORD RESET (Interpretation 1: active-only email + unverified hint, dynamic host) ============
+    path('accounts/password-reset/', views.UnverifiedAwarePasswordResetView.as_view(
         template_name='registration/password_reset_form.html',
         email_template_name='registration/password_reset_email.html',
         subject_template_name='registration/password_reset_subject.txt',
@@ -133,6 +133,13 @@ urlpatterns = [
     path('accounts/reset/done/', auth_views.PasswordResetCompleteView.as_view(
         template_name='registration/password_reset_complete.html',
     ), name='password_reset_complete'),
+    path('accounts/password-change/', auth_views.PasswordChangeView.as_view(
+        template_name='registration/password_change_form.html',
+        success_url='/obstacle-compliance/accounts/password-change/done/',
+    ), name='password_change'),
+    path('accounts/password-change/done/', auth_views.PasswordChangeDoneView.as_view(
+        template_name='registration/password_change_done.html',
+    ), name='password_change_done'),
 
     path('debug/', views.debug_geojson, name='debug'),
 ]
